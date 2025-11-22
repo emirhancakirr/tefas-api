@@ -36,9 +36,23 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = new HashMap<>();
         body.put("error", "INTERNAL_ERROR");
         body.put("message", ex.getMessage());
-        body.put("details", List.of());
+        
+        // Cause'u da ekle (daha detaylı hata bilgisi için)
+        List<String> details = new ArrayList<>();
+        if (ex.getCause() != null) {
+            details.add("Cause: " + ex.getCause().getClass().getSimpleName() + " - " + ex.getCause().getMessage());
+        }
+        // Stack trace'in ilk satırını ekle (debug için)
+        if (ex.getStackTrace().length > 0) {
+            StackTraceElement first = ex.getStackTrace()[0];
+            details.add("At: " + first.getClassName() + "." + first.getMethodName() + ":" + first.getLineNumber());
+        }
+        body.put("details", details);
         body.put("traceId", UUID.randomUUID().toString());
         body.put("timestamp", Instant.now().toString());
+
+        // Log the full exception for debugging
+        ex.printStackTrace();
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }

@@ -1,46 +1,34 @@
 package com.tefasfundapi.tefasFundAPI.controller;
 
+import com.tefasfundapi.tefasFundAPI.dto.FundDto;
+import com.tefasfundapi.tefasFundAPI.service.TefasService;
+import com.tefasfundapi.tefasFundAPI.filter.FieldFilter;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/funds")
 public class FundController {
 
-    // GET /v1/funds?query=...
-    @GetMapping
-    public Map<String, Object> listFunds(@RequestParam(required = false) String query) {
-        // Şimdilik sabit örnek dönelim
-        Map<String, Object> response = new HashMap<>();
-        List<Map<String, Object>> data = new ArrayList<>();
+    private final TefasService tefasService;
 
-        Map<String, Object> fund = new HashMap<>();
-        fund.put("fundCode", "ABC");
-        fund.put("fundName", "ABC Hisse");
-        fund.put("umbrellaType", "Hisse Senedi");
-        data.add(fund);
-
-        response.put("data", data);
-        response.put("meta", Map.of(
-                "page", 0,
-                "size", 1,
-                "totalElements", 1,
-                "totalPages", 1
-        ));
-
-        return response;
+    public FundController(TefasService tefasService) {
+        this.tefasService = tefasService;
     }
 
-    // GET /v1/funds/{code}
+    // GET /v1/funds/{code}?fields=code,name,...
     @GetMapping("/{code}")
-    public Map<String, Object> getFund(@PathVariable String code) {
-        // Şimdilik sabit örnek dönelim
-        return Map.of(
-                "fundCode", code,
-                "fundName", "ABC Hisse",
-                "umbrellaType", "Hisse Senedi",
-                "issuer", "XYZ Portföy"
-        );
+    public ResponseEntity<?> getFund(@PathVariable String code,
+                                     @RequestParam(required = false, name = "fields") String fieldsCsv) {
+        List<String> fields = FieldFilter.parse(fieldsCsv);
+        return tefasService.getFund(code.trim(), fields)
+                .<ResponseEntity<?>>map(dto -> ResponseEntity.ok(FieldFilter.apply(dto, fields)))
+                .orElseGet(() -> ResponseEntity.status(404).body(Map.of(
+                        "error", "NOT_FOUND",
+                        "message", "Fund not found: " + code
+                )));
     }
 }
