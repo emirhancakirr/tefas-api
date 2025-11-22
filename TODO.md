@@ -3,14 +3,14 @@
 ## Öncelik 1: API Yapısı Düzenlemeleri (Öncelikli)
 
 ### A. Controller Temizliği
-- [ ] NavController'ı kaldır (duplicate, HistoryController kullanılacak)
-- [ ] ComparisonController'ı kaldır (artık gerekli değil)
+- [X] NavController'ı kaldır (duplicate, HistoryController kullanılacak)
+- [X] ComparisonController'ı kaldır (artık gerekli değil)
 
 ### B. HistoryParser Implementasyonu
-- [ ] `HistoryParser.toPriceRows(String rawJson)` metodu oluştur
-- [ ] TEFAS JSON formatını `List<PriceRowDto>`'ya çevir
-- [ ] Error handling (HTML response, parse hataları)
-- [ ] Date parsing (TEFAS formatından LocalDate'e)
+- [X] `HistoryParser.toPriceRows(String rawJson)` metodu oluştur
+- [X] TEFAS JSON formatını `List<PriceRowDto>`'ya çevir
+- [X] Error handling (HTML response, parse hataları)
+- [X] Date parsing (TEFAS formatından LocalDate'e)
 
 ### C. Service Layer Genişletme
 - [ ] `TefasService` interface'ine `getFundNav(String code, LocalDate start, LocalDate end, Pageable pageable)` ekle
