@@ -3,11 +3,15 @@ package com.tefasfundapi.tefasFundAPI.service;
 import com.tefasfundapi.tefasFundAPI.client.FundsClient;
 import com.tefasfundapi.tefasFundAPI.dto.FundDto;
 import com.tefasfundapi.tefasFundAPI.dto.FundReturnQuery;
+import com.tefasfundapi.tefasFundAPI.dto.PagedResponse;
+import com.tefasfundapi.tefasFundAPI.dto.PriceRowDto;
 import com.tefasfundapi.tefasFundAPI.parser.FundsParser;
 import com.tefasfundapi.tefasFundAPI.client.HistoryClient;
 import com.tefasfundapi.tefasFundAPI.parser.HistoryParser;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,7 +29,8 @@ public class TefasServiceImpl implements TefasService {
     private final HistoryClient historyClient;
     private final HistoryParser historyParser;
 
-    public TefasServiceImpl(FundsClient fundsClient, FundsParser fundsParser, HistoryClient historyClient, HistoryParser historyParser) {
+    public TefasServiceImpl(FundsClient fundsClient, FundsParser fundsParser, HistoryClient historyClient,
+            HistoryParser historyParser) {
         this.fundsClient = fundsClient;
         this.fundsParser = fundsParser;
         this.historyClient = historyClient;
@@ -61,8 +66,10 @@ public class TefasServiceImpl implements TefasService {
     }
 
     @Override
-    public Optional<PagedResponse<PriceRowDto>> getFundNav(String code, LocalDate start, LocalDate end, Pageable pageable) {
-        System.out.println("TefasServiceImpl: getFundNav called with code=" + code + " and start=" + start + " and end=" + end + " and pageable=" + pageable);
+    public Optional<PagedResponse<PriceRowDto>> getFundNav(String code, LocalDate start, LocalDate end,
+            Pageable pageable) {
+        System.out.println("TefasServiceImpl: getFundNav called with code=" + code + " and start=" + start + " and end="
+                + end + " and pageable=" + pageable);
         if (code == null || code.isBlank())
             return Optional.empty();
 
@@ -78,7 +85,7 @@ public class TefasServiceImpl implements TefasService {
         int endIndex = Math.min(startIndex + size, totalElements);
         List<PriceRowDto> pagedList = list.subList(startIndex, endIndex);
 
-        PagedResponse<PriceRowDto> meta = new PagedResponse<>(pageData, new PagedResponse.Meta(page, size, totalElements, totalPages));
+        PagedResponse.Meta meta = new PagedResponse.Meta(page, size, totalElements, totalPages);
 
         return Optional.of(new PagedResponse<>(pagedList, meta));
     }
