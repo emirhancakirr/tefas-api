@@ -28,7 +28,7 @@ public class HistoryClient {
             try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
                 try {
-                    Page page = ctx.newPage();
+            Page page = ctx.newPage();
 
                     // Önce sayfaya git ve session oluştur
                     PlaywrightHelper.navigateForSession(page, REFERER);
@@ -38,24 +38,24 @@ public class HistoryClient {
 
                     APIRequestContext api = PlaywrightHelper.createApiContext(
                             pw, BASE_URL, ctx, DEFAULT_HEADERS);
-                    try {
-                        Map<String, String> form = new LinkedHashMap<>();
+            try {
+                Map<String, String> form = new LinkedHashMap<>();
                         form.put("fonturkod", fundCode);
                         form.put("bastarih", start.toString());
                         form.put("bittarih", end.toString());
                         String body = PlaywrightHelper.toFormEncoded(form);
 
-                        APIResponse res = api.post(API, RequestOptions.create().setData(body));
-                        String text = res.text();
+                APIResponse res = api.post(API, RequestOptions.create().setData(body));
+                String text = res.text();
 
                         // HTML dönerse (WAF engeli) hata fırlat
                         PlaywrightHelper.checkWafBlock(text);
 
                         PlaywrightHelper.ensureOk(res, text);
-                        return text;
-                    } finally {
-                        api.dispose();
-                    }
+                return text;
+            } finally {
+                api.dispose();
+            }
                 } finally {
                     ctx.close();
                 }

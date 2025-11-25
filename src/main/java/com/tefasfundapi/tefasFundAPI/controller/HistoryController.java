@@ -20,15 +20,15 @@ public class HistoryController {
      * Tek fonun tarihsel fiyat/NAV akışı
      * GET /v1/funds/{code}/nav?start=YYYY-MM-DD&end=YYYY-MM-DD
      */
-    @GetMapping("/{code}/nav")
+    @GetMapping("v1/funds/{code}/nav")
     public ResponseEntity<String> getNav(
             @PathVariable String code,
             @RequestParam String start,
-            @RequestParam String end
-    ) {
+            @RequestParam String end) {
         LocalDate s = LocalDate.parse(start);
         LocalDate e = LocalDate.parse(end);
-        if (s.isAfter(e)) return ResponseEntity.badRequest().body("{\"error\":\"start must be <= end\"}");
+        if (s.isAfter(e))
+            return ResponseEntity.badRequest().body("{\"error\":\"start must be <= end\"}");
 
         String json = historyClient.fetchHistoryJson(code.trim(), s, e);
         return ResponseEntity.ok(json);

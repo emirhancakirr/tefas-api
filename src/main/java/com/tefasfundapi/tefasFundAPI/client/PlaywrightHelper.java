@@ -53,11 +53,11 @@ public final class PlaywrightHelper {
     public static void navigateForSession(Page page, String url) {
         try {
             page.navigate(url);
-            // Network idle için bekle (maksimum 20 saniye)
-            page.waitForLoadState(LoadState.NETWORKIDLE,
-                    new Page.WaitForLoadStateOptions().setTimeout(20_000));
-            // Ekstra bekleme (WAF için)
-            page.waitForTimeout(1000);
+            // LOAD durumu: Sayfa yüklendi, tüm kaynaklar indirilmedi de olabilir
+            page.waitForLoadState(LoadState.LOAD,
+                    new Page.WaitForLoadStateOptions().setTimeout(30_000));
+            // WAF için daha uzun bekleme
+            page.waitForTimeout(3000);
         } catch (Exception e) {
             throw new RuntimeException("Failed to navigate to " + url + ": " + e.getMessage(), e);
         }
