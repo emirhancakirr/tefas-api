@@ -24,11 +24,11 @@ public class HistoryController {
     public ResponseEntity<String> getNav(
             @PathVariable String code,
             @RequestParam String start,
-            @RequestParam String end
-    ) {
+            @RequestParam String end) {
         LocalDate s = LocalDate.parse(start);
         LocalDate e = LocalDate.parse(end);
-        if (s.isAfter(e)) return ResponseEntity.badRequest().body("{\"error\":\"start must be <= end\"}");
+        if (s.isAfter(e))
+            return ResponseEntity.badRequest().body("{\"error\":\"start must be <= end\"}");
 
         String json = historyClient.fetchHistoryJson(code.trim(), s, e);
         return ResponseEntity.ok(json);

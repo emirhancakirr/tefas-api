@@ -2,77 +2,116 @@ package com.tefasfundapi.tefasFundAPI.client;
 
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.LoadState;
-import com.microsoft.playwright.options.RequestOptions;
 import org.springframework.stereotype.Component;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * TEFAS tarihsel veri (NAV) istemcisi.
+ * WAF bypass için sayfa üzerinden response dinleme yaklaşımını kullanır.
+ */
 @Component
 public class HistoryClient {
     private static final String BASE_URL = "https://www.tefas.gov.tr";
-    private static final String REFERER  = BASE_URL + "/TarihselVeriler.aspx";
-    private static final String API      = "/api/DB/BindHistoryInfo";
+    private static final String REFERER = BASE_URL + "/TarihselVeriler.aspx";
+    private static final String API = "/api/DB/BindHistoryInfo";
+    private static final int WAF_WAIT_MS = 5000;
+    private static final int RESPONSE_TIMEOUT_SECONDS = 30;
 
-    private static final Map<String, String> DEFAULT_HEADERS = Map.of(
-            "Origin", BASE_URL,
-            "Referer", REFERER,
-            "X-Requested-With", "XMLHttpRequest",
-            "Accept", "application/json, text/javascript, */*; q=0.01",
-            "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8"
-    );
-
-    /** Tek fon ve tarih aralığı için fiyat/NAV+diğer sütunlar JSON’u döner. */
+    /**
+     * Tek fon ve tarih aralığı için fiyat/NAV+diğer sütunlar JSON'u döner.
+     * Sayfa üzerinden response dinleme yaklaşımını kullanır (WAF bypass için).
+     * 
+     * @param fundCode Fon kodu (örn: "AAK")
+     * @param start    Başlangıç tarihi
+     * @param end      Bitiş tarihi
+     * @return JSON string
+     */
     public String fetchHistoryJson(String fundCode, LocalDate start, LocalDate end) {
-        try (Playwright pw = Playwright.create();
-             Browser browser = pw.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
-             BrowserContext ctx = browser.newContext()) {
+        try (Playwright pw = Playwright.create()) {
+            System.out.println("HistoryClient/fetchHistoryJson started");
+            try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
+                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
+                try {
+                    Page page = ctx.newPage();
+                    CompletableFuture<Response> responseFuture = setupResponseListener(page);
 
-            Page page = ctx.newPage();
-            page.navigate(REFERER);
-            page.waitForLoadState(LoadState.NETWORKIDLE);
+                    navigateAndWaitForWaf(page);
 
-            APIRequestContext api = pw.request().newContext(
-                    new APIRequest.NewContextOptions()
-                            .setBaseURL(BASE_URL)
-                            .setStorageState(ctx.storageState())
-                            .setExtraHTTPHeaders(DEFAULT_HEADERS));
-            try {
-                Map<String, String> form = new LinkedHashMap<>();
-                form.put("fonturkod", fundCode);       // Sniffer ile doğrula
-                form.put("bastarih",  start.toString());
-                form.put("bittarih",  end.toString());
-                String body = toFormEncoded(form);
+                    Map<String, String> form = buildHistoryForm(fundCode, start, end);
+                    PlaywrightHelper.triggerApiCallViaJavaScript(page, API, form);
 
-                APIResponse res = api.post(API, RequestOptions.create().setData(body));
-                String text = res.text();
-                ensureOk(res, text);
-                return text;
-            } finally {
-                api.dispose();
+                    Response response = responseFuture.get(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    return PlaywrightHelper.validateResponse(response);
+                } finally {
+                    ctx.close();
+                }
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("TEFAS/fetchHistoryJson interrupted", e);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RuntimeException(
+                    "TEFAS/fetchHistoryJson timeout: API response not received within " + RESPONSE_TIMEOUT_SECONDS
+                            + " seconds",
+                    e);
         } catch (Exception e) {
-            throw new RuntimeException("HistoryClient çağrısı başarısız: " + e.getMessage(), e);
+            throw new RuntimeException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
         }
     }
 
-    private static void ensureOk(APIResponse res, String body) {
-        int s = res.status();
-        if (s == 401 || s == 403) throw new RuntimeException("Unauthorized/Forbidden: " + s);
-        if (s < 200 || s >= 300)  throw new RuntimeException("Upstream " + s + " " + res.statusText() + " body=" + body);
+    /**
+     * API response'unu dinlemek için listener kurar.
+     */
+    private CompletableFuture<Response> setupResponseListener(Page page) {
+        CompletableFuture<Response> responseFuture = new CompletableFuture<>();
+
+        page.onResponse(response -> {
+            if (response.url().contains(API) && !responseFuture.isDone()) {
+                responseFuture.complete(response);
+            }
+        });
+
+        return responseFuture;
     }
 
-    private static String toFormEncoded(Map<String, String> form) {
-        StringBuilder sb = new StringBuilder();
-        for (var e : form.entrySet()) {
-            if (sb.length() > 0) sb.append('&');
-            sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
-                    .append('=')
-                    .append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), StandardCharsets.UTF_8));
-        }
-        return sb.toString();
+    /**
+     * Sayfaya gider, WAF challenge'ını bekler.
+     */
+    private void navigateAndWaitForWaf(Page page) throws InterruptedException {
+        PlaywrightHelper.navigateForSession(page, REFERER);
+        page.waitForLoadState(LoadState.NETWORKIDLE);
+        Thread.sleep(WAF_WAIT_MS);
+    }
+
+    /**
+     * TEFAS API'sine gönderilecek form parametrelerini oluşturur.
+     * Gerçek site payload formatına uygun olarak tüm parametreleri içerir.
+     * 
+     * @param fundCode Fon kodu (örn: "AAK")
+     * @param start    Başlangıç tarihi
+     * @param end      Bitiş tarihi
+     * @return Form parametreleri Map'i
+     */
+    private static Map<String, String> buildHistoryForm(String fundCode, LocalDate start, LocalDate end) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("fontip", "YAT");
+        form.put("sfontur", "");
+        form.put("fonkod", "");
+        form.put("fongrup", "");
+        form.put("bastarih", start.format(formatter));
+        form.put("bittarih", end.format(formatter));
+        form.put("fonturkod", fundCode != null ? fundCode : "");
+        form.put("fonunvantip", "");
+        form.put("kurucukod", "");
+
+        return form;
     }
 }

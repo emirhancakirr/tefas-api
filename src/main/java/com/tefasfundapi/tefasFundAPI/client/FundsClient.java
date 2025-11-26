@@ -6,8 +6,6 @@ import com.microsoft.playwright.options.RequestOptions;
 import com.tefasfundapi.tefasFundAPI.dto.FundReturnQuery;
 import org.springframework.stereotype.Component;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -43,19 +41,9 @@ public class FundsClient {
     /** /api/DB/BindComparisonFundReturns çağrısı (form-encoded). */
     public String fetchComparisonFundReturns(FundReturnQuery q) {
         try (Playwright pw = Playwright.create()) {
-            BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
-                    .setHeadless(true)
-                    .setArgs(List.of("--disable-blink-features=AutomationControlled"));
-
-            try (Browser browser = pw.chromium().launch(launchOptions)) {
-                Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()
-                        .setUserAgent(
-                                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        .setViewportSize(1920, 1080)
-                        .setLocale("tr-TR")
-                        .setTimezoneId("Europe/Istanbul");
-
-                BrowserContext ctx = browser.newContext(contextOptions);
+            System.out.println("FundsClient/fetchComparisonFundReturns started");
+            try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
+                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
                 try {
                     Page page = ctx.newPage();
 
@@ -72,7 +60,7 @@ public class FundsClient {
                     });
 
                     // Sayfaya git
-                    navigateForSession(page, REFERER_COMPARISON);
+                    PlaywrightHelper.navigateForSession(page, REFERER_COMPARISON);
 
                     // Sayfa yüklendikten sonra biraz bekle
                     Thread.sleep(2000);
@@ -129,25 +117,12 @@ public class FundsClient {
      */
     public String fetchFundsJson(String query, List<String> codes) {
         try (Playwright pw = Playwright.create()) {
-            // Daha gerçekçi browser ayarları
-            BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
-                    .setHeadless(true)
-                    .setArgs(List.of("--disable-blink-features=AutomationControlled")); // Bot detection'ı bypass etmek
-                                                                                        // için
-
-            try (Browser browser = pw.chromium().launch(launchOptions)) {
-                // Gerçekçi browser context (User-Agent, viewport, vb.)
-                Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()
-                        .setUserAgent(
-                                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        .setViewportSize(1920, 1080)
-                        .setLocale("tr-TR")
-                        .setTimezoneId("Europe/Istanbul");
-
-                BrowserContext ctx = browser.newContext(contextOptions);
+            System.out.println("Test");
+            try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
+                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
                 try {
                     Page page = ctx.newPage();
-                    navigateForSession(page, REFERER_FUNDS);
+                    PlaywrightHelper.navigateForSession(page, REFERER_FUNDS);
 
                     // Sayfa yüklendikten sonra biraz bekle (WAF için)
                     Thread.sleep(2000);
@@ -159,12 +134,9 @@ public class FundsClient {
                         String text = res.text();
 
                         // HTML dönerse (WAF engeli) hata fırlat
-                        if (text.trim().startsWith("<")) {
-                            throw new RuntimeException("TEFAS WAF blocked the request. Response: " +
-                                    (text.length() > 500 ? text.substring(0, 500) : text));
-                        }
+                        PlaywrightHelper.checkWafBlock(text);
 
-                        ensureOk(res, text);
+                        PlaywrightHelper.ensureOk(res, text);
                         return text;
                     } finally {
                         api.dispose();
@@ -242,7 +214,7 @@ public class FundsClient {
                     });
 
                     // Sayfaya git
-                    navigateForSession(page, REFERER_COMPARISON);
+                    PlaywrightHelper.navigateForSession(page, REFERER_COMPARISON);
 
                     // Sayfa yüklendikten sonra biraz bekle
                     Thread.sleep(2000);
@@ -281,29 +253,6 @@ public class FundsClient {
         }
     }
 
-    /** WAF/oturum için sayfaya gidip network idle bekle. */
-    private static void navigateForSession(Page page, String url) {
-        try {
-            page.navigate(url);
-            // Network idle için bekle
-            page.waitForLoadState(LoadState.NETWORKIDLE, new Page.WaitForLoadStateOptions().setTimeout(20_000));
-            // Ekstra bekleme (WAF için)
-            page.waitForTimeout(1000);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to navigate to " + url + ": " + e.getMessage(), e);
-        }
-    }
-
-    private static void ensureOk(APIResponse res, String bodyText) {
-        int status = res.status();
-        if (status == 401 || status == 403) {
-            throw new RuntimeException("Unauthorized/Forbidden from upstream: " + status);
-        }
-        if (status < 200 || status >= 300) {
-            throw new RuntimeException("Upstream error " + status + " " + res.statusText() + " body=" + bodyText);
-        }
-    }
-
     /* ---------- Body builders ---------- */
 
     /** Comparison form body: Sniffer’da gördüğün alanları birebir kullanıyoruz. */
@@ -320,7 +269,7 @@ public class FundsClient {
         form.put("fonunvantip", nz(q.getFonunvantip()));
         form.put("strperiod", nz(q.getStrperiod())); // "m1,m3,..." vb.
         form.put("islemdurum", nz(q.getIslemdurum()));
-        return toFormEncoded(form);
+        return PlaywrightHelper.toFormEncoded(form);
     }
 
     /**
@@ -342,24 +291,10 @@ public class FundsClient {
         form.put("fonunvantip", "");
         form.put("strperiod", ""); // Periyot bilgisi gerekmiyorsa boş
         form.put("islemdurum", "");
-        return toFormEncoded(form);
-    }
-
-    private static String toFormEncoded(Map<String, String> form) {
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, String> e : form.entrySet()) {
-            if (sb.length() > 0)
-                sb.append('&');
-            sb.append(encode(e.getKey())).append('=').append(encode(e.getValue()));
-        }
-        return sb.toString();
+        return PlaywrightHelper.toFormEncoded(form);
     }
 
     private static String nz(String s) {
         return s == null ? "" : s;
-    }
-
-    private static String encode(String s) {
-        return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 }

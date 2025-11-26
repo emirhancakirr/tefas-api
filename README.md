@@ -1,6 +1,6 @@
-# TEFAS Fund API
+# TEFAS Fund Data API
 
-Türkiye'deki yatırım fonları hakkında veri sağlayan RESTful API middleware. TEFAS (Takasbank Elektronik Fon Alım Satım Platformu) web sitesinden Playwright kullanarak veri çeker ve düzenlenmiş, kullanıma hazır JSON formatında sunar.
+Türkiye'deki yatırım fonları hakkında veri sağlayan RESTful API Proxy. TEFAS (Takasbank Elektronik Fon Alım Satım Platformu) web sitesinden Playwright kullanarak veri çeker ve düzenlenmiş, kullanıma hazır JSON formatında sunar.
 
 ## 🚀 Özellikler
 
