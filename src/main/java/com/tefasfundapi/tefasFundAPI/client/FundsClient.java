@@ -41,6 +41,7 @@ public class FundsClient {
     /** /api/DB/BindComparisonFundReturns çağrısı (form-encoded). */
     public String fetchComparisonFundReturns(FundReturnQuery q) {
         try (Playwright pw = Playwright.create()) {
+            System.out.println("FundsClient/fetchComparisonFundReturns started");
             try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
                 try {
@@ -116,6 +117,7 @@ public class FundsClient {
      */
     public String fetchFundsJson(String query, List<String> codes) {
         try (Playwright pw = Playwright.create()) {
+            System.out.println("Test");
             try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
                 try {

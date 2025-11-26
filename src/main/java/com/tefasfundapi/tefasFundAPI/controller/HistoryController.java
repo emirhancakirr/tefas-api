@@ -20,7 +20,7 @@ public class HistoryController {
      * Tek fonun tarihsel fiyat/NAV akışı
      * GET /v1/funds/{code}/nav?start=YYYY-MM-DD&end=YYYY-MM-DD
      */
-    @GetMapping("v1/funds/{code}/nav")
+    @GetMapping("/{code}/nav")
     public ResponseEntity<String> getNav(
             @PathVariable String code,
             @RequestParam String start,
