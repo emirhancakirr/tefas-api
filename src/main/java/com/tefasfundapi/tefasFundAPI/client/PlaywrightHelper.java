@@ -57,7 +57,7 @@ public final class PlaywrightHelper {
             page.waitForLoadState(LoadState.LOAD,
                     new Page.WaitForLoadStateOptions().setTimeout(30_000));
             // WAF için daha uzun bekleme
-            page.waitForTimeout(3000);
+            page.waitForTimeout(10000);
         } catch (Exception e) {
             throw new RuntimeException("Failed to navigate to " + url + ": " + e.getMessage(), e);
         }
@@ -175,53 +175,44 @@ public final class PlaywrightHelper {
     private static String buildAjaxScript(String apiUrl, Map<String, String> formData) {
         StringBuilder script = new StringBuilder();
         script.append("(function() {");
-        
+
+        // URLSearchParams oluştur (hem jQuery hem fetch için ortak)
+        script.append("var params = new URLSearchParams();");
+        for (Map.Entry<String, String> entry : formData.entrySet()) {
+            script.append("params.append(")
+                    .append(escapeJsForJs(entry.getKey()))
+                    .append(", ")
+                    .append(escapeJsForJs(entry.getValue()))
+                    .append(");");
+        }
+        script.append("var formDataString = params.toString();");
+
         // jQuery ile AJAX çağrısı
         script.append("if (typeof $ !== 'undefined') {");
         script.append("$.ajax({");
         script.append("url: ").append(escapeJsForJs(apiUrl)).append(",");
         script.append("type: 'POST',");
-        script.append("data: {");
-        
-        boolean first = true;
-        for (Map.Entry<String, String> entry : formData.entrySet()) {
-            if (!first) {
-                script.append(",");
-            }
-            script.append(entry.getKey())
-                  .append(": ")
-                  .append(escapeJsForJs(entry.getValue()));
-            first = false;
-        }
-        
-        script.append("},");
+        script.append("contentType: 'application/x-www-form-urlencoded; charset=UTF-8',");
+        script.append("processData: false,"); // jQuery'nin otomatik serialize'ını devre dışı bırak
+        script.append("data: formDataString,"); // Manuel serialize edilmiş string kullan
         script.append("success: function(data) { console.log('API call successful'); },");
         script.append("error: function(xhr, status, error) { console.log('API call error:', error); }");
         script.append("});");
         script.append("} else {");
-        
+
         // Fetch fallback
-        script.append("var params = new URLSearchParams();");
-        for (Map.Entry<String, String> entry : formData.entrySet()) {
-            script.append("params.append(")
-                  .append(escapeJsForJs(entry.getKey()))
-                  .append(", ")
-                  .append(escapeJsForJs(entry.getValue()))
-                  .append(");");
-        }
-        
         script.append("fetch(").append(escapeJsForJs(apiUrl)).append(", {");
         script.append("method: 'POST',");
         script.append("headers: {");
         script.append("'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',");
         script.append("'X-Requested-With': 'XMLHttpRequest'");
         script.append("},");
-        script.append("body: params.toString()");
+        script.append("body: formDataString");
         script.append("}).then(function(response) { console.log('API call successful'); })");
         script.append(".catch(function(error) { console.log('API call error:', error); });");
         script.append("}");
         script.append("})();");
-        
+
         return script.toString();
     }
 
@@ -258,7 +249,8 @@ public final class PlaywrightHelper {
     }
 
     /**
-     * Response'un başarılı olup olmadığını kontrol eder ve WAF engelini kontrol eder.
+     * Response'un başarılı olup olmadığını kontrol eder ve WAF engelini kontrol
+     * eder.
      * 
      * @param response Playwright Response objesi
      * @return Response text
@@ -266,10 +258,10 @@ public final class PlaywrightHelper {
      */
     public static String validateResponse(Response response) {
         String text = response.text();
-        
+
         // WAF engeli kontrolü
         checkWafBlock(text);
-        
+
         // Status kontrolü
         int status = response.status();
         if (status == 401 || status == 403) {
@@ -278,7 +270,7 @@ public final class PlaywrightHelper {
         if (status < 200 || status >= 300) {
             throw new RuntimeException("Upstream error " + status + " " + response.statusText());
         }
-        
+
         return text;
     }
 }

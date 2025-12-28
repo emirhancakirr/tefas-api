@@ -61,7 +61,6 @@ public class TefasServiceImpl implements TefasService {
                 .filter(f -> f.getFundCode() != null && f.getFundCode().equalsIgnoreCase(code.trim()))
                 .findFirst();
 
-        // burada DTO olarak bırakıyoruz.
         return match;
     }
 
@@ -83,7 +82,13 @@ public class TefasServiceImpl implements TefasService {
 
         int startIndex = page * size;
         int endIndex = Math.min(startIndex + size, totalElements);
-        List<PriceRowDto> pagedList = list.subList(startIndex, endIndex);
+        List<PriceRowDto> pagedList;
+
+        if (startIndex >= totalElements) {
+            pagedList = List.of();
+        } else {
+            pagedList = list.subList(startIndex, endIndex);
+        }
 
         PagedResponse.Meta meta = new PagedResponse.Meta(page, size, totalElements, totalPages);
 

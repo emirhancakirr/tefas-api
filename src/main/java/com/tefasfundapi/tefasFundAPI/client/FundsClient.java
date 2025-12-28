@@ -20,11 +20,9 @@ public class FundsClient {
 
     // --- Karşılaştırma (period bazlı) sayfa & API ---
     private static final String REFERER_COMPARISON = BASE_URL + "/FonKarsilastirma.aspx";
-    private static final String API_COMPARISON = "/api/DB/BindComparisonFundReturns";
 
     // --- Fon liste/arama sayfa & API ---
-    private static final String REFERER_FUNDS = BASE_URL + "/FonKarsilastirma.aspx";
-    private static final String API_FUNDS = "/api/DB/BindComparisonFundReturns";
+    private static final String API_COMPARISON_FUND_RETURNS = "/api/DB/BindComparisonFundReturns";
 
     private static final Map<String, String> DEFAULT_HEADERS = Map.of(
             "Origin", BASE_URL,
@@ -67,9 +65,7 @@ public class FundsClient {
 
                     // Form parametrelerini sayfaya gönder (JavaScript ile)
                     // veya sayfada filtreleme yap
-                    // Bu kısım q parametresine göre değişebilir
 
-                    // Response'u bekle (maksimum 30 saniye)
                     Response response = responseFuture.get(30, java.util.concurrent.TimeUnit.SECONDS);
 
                     String json = response.text();
@@ -114,23 +110,23 @@ public class FundsClient {
      * Fon arama/listesi için XHR çağrısı.
      * NOT: Aşağıdaki endpoint/body KEY’LERİ örnek. Playwright Sniffer ile
      * gerçekte ne gönderiliyorsa birebir buraya yaz.
+     * 
      */
     public String fetchFundsJson(String query, List<String> codes) {
         try (Playwright pw = Playwright.create()) {
-            System.out.println("Test");
             try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions())) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
                 try {
                     Page page = ctx.newPage();
-                    PlaywrightHelper.navigateForSession(page, REFERER_FUNDS);
+                    PlaywrightHelper.navigateForSession(page, REFERER_COMPARISON);
 
                     // Sayfa yüklendikten sonra biraz bekle (WAF için)
                     Thread.sleep(2000);
 
-                    APIRequestContext api = createApiContext(pw, ctx, REFERER_FUNDS);
+                    APIRequestContext api = createApiContext(pw, ctx, REFERER_COMPARISON);
                     try {
                         String body = buildFundsFormBody(query, codes);
-                        APIResponse res = api.post(API_FUNDS, RequestOptions.create().setData(body));
+                        APIResponse res = api.post(API_COMPARISON_FUND_RETURNS, RequestOptions.create().setData(body));
                         String text = res.text();
 
                         // HTML dönerse (WAF engeli) hata fırlat
