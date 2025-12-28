@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException.NotImplemented;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -127,57 +127,118 @@ public class FundsClient {
      * gerçekte ne gönderiliyorsa birebir buraya yaz.
      * 
      */
-    // public String fetchFundsJson(String fundCode, LocalDateTime start, LocalDateTime end) {
-    //     try (Playwright pw = Playwright.create()) {
-    //         log.debug("fetchFundsJson started for fundCode{}, start={}, end={}", fundCode, start, end);
+    public String fetchFundPerformance(String fundCode, LocalDate start, LocalDate end) {
+        try (Playwright pw = Playwright.create()) {
+            log.debug("fetchFundsJson started for fundCode{}, start={}, end={}", fundCode, start, end);
 
-    //         BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
-    //                 .setHeadless(config.isHeadless());
+            BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
+                    .setHeadless(false);
 
-    //                 try (Browser browser = pw.chromium().launch(launchOptions)){
-    //                     BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
-    //                     try {
-    //                         Page page = ctx.newPage();
+            try (Browser browser = pw.chromium().launch(launchOptions)) {
+                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
+                try {
+                    Page page = ctx.newPage();
 
-    //                         return NotImplemented
-    //                     } catch (Exception e) {
-    //                         // TODO: handle exception
-    //                     }
-    //                 } catch (Exception e) {
-    //                     // TODO: handle exception
-    //                 }
-    //     } catch (Exception e) {
-    //         log.error("Unexpected error in fetchHistoryJson for fundCode={}, start={}, end={}", fundCode, start, end,
-    //                 e);
-    //         throw new TefasClientException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
-    //     }
-    // }
+                    PlaywrightHelper.setupRequestLogger(page, config.getComparisonApiEndpoint());
+                    PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
+                    PlaywrightHelper.fillDateFields(page, start, end, config);
+
+                    // TO-DO fix fillfundCodeFilter and look why it
+                    PlaywrightHelper.fillFundCodeFilter(page, fundCode, config,
+                            "input[type='search'][aria-controls='table_fund_returns']");
+                    PlaywrightHelper.clickSearchButton(page, config);
+                    PlaywrightHelper.waitForFundReturnsTable(page, config);
+                    String tablejson = extractFundReturnsTableData(page, fundCode, config);
+                    return tablejson;
+
+                } finally {
+                    ctx.close();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new TefasClientException("Tefas/fetchFuncPerdormance interrupted", e);
+            } catch (com.microsoft.playwright.TimeoutError e) {
+                throw new TefasTimeoutException("fetchFundsPerformance", config.getElementWaitTimeoutMs());
+            } catch (TefasClientException e) {
+                throw e;
+            }
+        } catch (Exception e) {
+            log.error("Unexpected error in fetchHistoryJson for fundCode={}, start={}, end={}", fundCode, start, end,
+                    e);
+            throw new TefasClientException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
+        }
+    }
+
+    // PlaywrightHelper.java'ya ekle
+
+    /**
+     * Extracts fund performance data from table_fund_returns.
+     * 
+     * @param page     Playwright Page objesi
+     * @param fundCode Fon kodu (filtering için, null ise tüm fonlar)
+     * @param config   Playwright konfigürasyonu
+     * @return JSON string with fund performance data
+     */
+    public static String extractFundReturnsTableData(Page page, String fundCode, PlaywrightConfig config) {
+        try {
+            // Wait for table rows
+            page.waitForSelector("#table_fund_returns tbody tr:not(.dataTables_empty)",
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
+
+            // Wait for DataTables to fully render
+            Thread.sleep(config.getTableDataExtractionWaitMs());
+
+            // Extract raw data
+            String rawJson = (String) page.evaluate("""
+                    (function() {
+                        const table = document.querySelector('#table_fund_returns');
+                        if (!table) {
+                            return JSON.stringify({ data: [] });
+                        }
+
+                        const rows = table.querySelectorAll('tbody tr');
+                        const data = [];
+
+                        rows.forEach(row => {
+                            if (row.classList.contains('dataTables_empty')) {
+                                return;
+                            }
+
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length >= 4) {
+                                data.push({
+                                    fonKodu: cells[0].textContent.trim(),
+                                    fonAdi: cells[1].textContent.trim(),
+                                    semsiyeFonTuru: cells[2].textContent.trim(),
+                                    getiri: cells[3].textContent.trim()
+                                });
+                            }
+                        });
+
+                        return JSON.stringify({ data: data });
+                    })();
+                    """);
+
+            log.debug("Raw extracted JSON length: {}", rawJson.length());
+
+            // Filter by fund code if provided (in Java, not JavaScript)
+            if (fundCode != null && !fundCode.isBlank()) {
+                // Parse and filter JSON here if needed
+                // Or filter in JavaScript above
+            }
+
+            return rawJson;
+
+        } catch (Exception e) {
+            throw new TefasClientException("Failed to extract fund returns table data: " + e.getMessage(), e);
+        }
+    }
 
     /*
      * =======================================================================
      * Ortak yardımcılar
      * =======================================================================
      */
-
-    private APIRequestContext createApiContext(Playwright pw, BrowserContext ctx, String referer) {
-        Map<String, String> headers = new HashMap<>(getDefaultHeaders());
-        headers.put("Referer", referer);
-        headers.put("User-Agent",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-        headers.put("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7");
-        headers.put("Accept-Encoding", "gzip, deflate, br");
-        headers.put("Connection", "keep-alive");
-        headers.put("Sec-Fetch-Dest", "empty");
-        headers.put("Sec-Fetch-Mode", "cors");
-        headers.put("Sec-Fetch-Site", "same-origin");
-
-        return pw.request().newContext(
-                new APIRequest.NewContextOptions()
-                        .setBaseURL(config.getBaseUrl())
-                        .setStorageState(ctx.storageState()) // çerez/localStorage kopyala
-                        .setExtraHTTPHeaders(headers)
-                        .setTimeout((double) config.getNavigationTimeoutMs()));
-    }
 
     /**
      * Sayfaya gidip /api/DB/BindComparisonFundReturns endpoint'ini dinler ve JSON

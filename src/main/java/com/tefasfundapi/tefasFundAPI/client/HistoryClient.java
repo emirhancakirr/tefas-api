@@ -55,7 +55,7 @@ public class HistoryClient {
                     PlaywrightHelper.fillDateFields(page, start, end, config);
 
                     // Step 2: Fill fund code filter (before clicking button)
-                    PlaywrightHelper.fillFundCodeFilter(page, fundCode, config);
+                    PlaywrightHelper.fillFundCodeFilter(page, fundCode, config,null);
 
                     // Step 3: Click "Görüntüle" button to load table
                     PlaywrightHelper.clickSearchButton(page, config);

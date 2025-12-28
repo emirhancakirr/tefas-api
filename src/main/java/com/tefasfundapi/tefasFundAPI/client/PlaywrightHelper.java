@@ -103,25 +103,65 @@ public final class PlaywrightHelper {
         }
     }
 
-    public static void fillFundCodeFilter(Page page, String fundCode, PlaywrightConfig config) {
+    /**
+     * Fills the fund code filter input (DataTables search box).
+     * This filters the table client-side after it's loaded.
+     * 
+     * @param page     Playwright Page objesi
+     * @param fundCode Fon kodu
+     * @param config   Playwright konfigürasyonu
+     * @param selector Optional selector. If null, uses config selector. If empty
+     *                 string, skips filter.
+     */
+    public static void fillFundCodeFilter(Page page, String fundCode, PlaywrightConfig config, String selector) {
         if (fundCode == null || fundCode.isBlank()) {
             log.debug("Fund code is empty, skipping filter");
             return;
         }
 
+        // If selector is empty string, skip filter (for pages that don't have this
+        // filter)
+        if (selector != null && selector.isEmpty()) {
+            log.debug("Fund code filter selector is empty, skipping filter");
+            return;
+        }
+
         try {
-            page.waitForSelector(config.getSelectors().getFundCodeFilter(),
+            // Use provided selector or fallback to config
+            String finalSelector = (selector != null && !selector.isEmpty())
+                    ? selector
+                    : config.getSelectors().getFundCodeFilter();
+
+            // Check if selector exists on page
+            boolean exists = (Boolean) page.evaluate("""
+                    (function() {
+                        return document.querySelector(arguments[0]) !== null;
+                    })();
+                    """, finalSelector);
+
+            if (!exists) {
+                log.warn("Fund code filter selector not found on page: {}, skipping filter", finalSelector);
+                return; // Skip if not found
+            }
+
+            page.waitForSelector(finalSelector,
                     new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
 
-            fillInputField(page, config.getSelectors().getFundCodeFilter(), fundCode.trim(),
+            fillInputField(page, finalSelector, fundCode.trim(),
                     "Fund Code Filter", config);
 
             Thread.sleep(config.getFilterApplyWaitMs());
 
-            log.debug("Fund code filter filled: {}", fundCode);
+            log.debug("Fund code filter filled: {} with selector: {}", fundCode, finalSelector);
         } catch (Exception e) {
-            throw new TefasClientException("Failed to fill fund code filter: " + e.getMessage(), e);
+            log.warn("Failed to fill fund code filter (may not exist on this page): {}", e.getMessage());
+            // Don't throw - just log warning and continue
         }
+    }
+
+    // Overloaded method for backward compatibility (uses config selector)
+    public static void fillFundCodeFilter(Page page, String fundCode, PlaywrightConfig config) {
+        fillFundCodeFilter(page, fundCode, config, null);
     }
 
     public static void clickSearchButton(Page page, PlaywrightConfig config) {
@@ -194,6 +234,76 @@ public final class PlaywrightHelper {
     }
 
     // ==================== Table Loading ====================
+
+    // PlaywrightHelper.java - waitForTableToLoad'dan sonra ekle
+
+    /**
+     * Waits for the fund returns table (#table_fund_returns) to fully load.
+     * This is specific to the comparison page (FonKarsilastirma.aspx).
+     * 
+     * @param page   Playwright Page objesi
+     * @param config Playwright konfigürasyonu
+     * @throws TefasTimeoutException if table doesn't load within timeout
+     * @throws TefasClientException  if waiting fails
+     */
+    public static void waitForFundReturnsTable(Page page, PlaywrightConfig config) {
+        try {
+            // Wait for table structure
+            page.waitForSelector("#table_fund_returns tbody",
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
+
+            // Wait for data rows to appear (not empty)
+            page.waitForSelector("#table_fund_returns tbody tr:not(.dataTables_empty)",
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
+
+            // Wait for at least one row with valid data (check for fund code in first cell)
+            long startTime = System.currentTimeMillis();
+            boolean hasValidData = false;
+
+            while (!hasValidData && (System.currentTimeMillis() - startTime) < config.getElementWaitTimeoutMs()) {
+                Object result = page.evaluate("""
+                        (function() {
+                            const table = document.querySelector('#table_fund_returns');
+                            if (!table) return false;
+
+                            const rows = table.querySelectorAll('tbody tr:not(.dataTables_empty)');
+                            for (let row of rows) {
+                                const cells = row.querySelectorAll('td');
+                                if (cells.length >= 4) {
+                                    const fundCode = cells[0].textContent.trim();
+                                    // Check if it's a valid fund code (not empty, not header)
+                                    if (fundCode && fundCode.length >= 2 && fundCode !== 'Fon Kodu') {
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        })();
+                        """);
+
+                hasValidData = Boolean.TRUE.equals(result);
+
+                if (!hasValidData) {
+                    Thread.sleep(config.getRetryWaitMs());
+                }
+            }
+
+            if (!hasValidData) {
+                throw new TefasTimeoutException("waitForFundReturnsTable", config.getElementWaitTimeoutMs());
+            }
+
+            // Additional wait for DataTables to finish processing
+            Thread.sleep(config.getTableLoadWaitMs());
+
+            log.info("Fund returns table loaded successfully with data rows");
+
+        } catch (TefasTimeoutException e) {
+            // Re-throw timeout exceptions as-is
+            throw e;
+        } catch (Exception e) {
+            throw new TefasClientException("Failed to wait for fund returns table to load: " + e.getMessage(), e);
+        }
+    }
 
     /**
      * Waits for the data table to fully load with actual data rows.

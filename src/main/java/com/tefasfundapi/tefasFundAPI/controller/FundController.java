@@ -12,6 +12,8 @@ import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
 
 import java.util.List;
@@ -40,18 +42,19 @@ public class FundController {
     }
 
     // FundController.java
-    // @GetMapping("/{code}/performance")
-    // public ResponseEntity<?> getPerformance(
-    //         @PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
-    //         @RequestParam @NotNull(message = "Start date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
-    //         @RequestParam @NotNull(message = "End date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+    @GetMapping("/{code}/performance")
+    public ResponseEntity<?> getPerformance(
+            @PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
+            @RequestParam @NotNull(message = "Start date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam @NotNull(message = "End date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+            @PageableDefault(size = 20) Pageable pageable) {
 
-    //     if (start.isAfter(end)) {
-    //         throw new InvalidDateRangeException("start date must be <= end date");
-    //     }
+        if (start.isAfter(end)) {
+            throw new InvalidDateRangeException("start date must be <= end date");
+        }
 
-    //     return tefasService.getFundPerformance(code.trim(), start, end)
-    //             .map(ResponseEntity::ok)
-    //             .orElseThrow(() -> new FundNotFoundException(code));
-    // }
+        return tefasService.getFundPerformance(code.trim(), start, end, pageable)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new FundNotFoundException(code));
+    }
 }

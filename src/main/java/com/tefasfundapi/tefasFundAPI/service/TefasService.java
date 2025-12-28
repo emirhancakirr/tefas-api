@@ -15,7 +15,7 @@ public interface TefasService {
 
     Optional<PagedResponse<PriceRowDto>> getFundNav(String code, LocalDate start, LocalDate end, Pageable pageable);
 
-    // Optional<PagedResponse<FundPerformanceDto>> getFundPerformance(String code,
-    // LocalDate start, LocalDate end,
-    // Pageable pageable);
+    Optional<PagedResponse<FundPerformanceDto>> getFundPerformance(String code,
+            LocalDate start, LocalDate end,
+            Pageable pageable);
 }

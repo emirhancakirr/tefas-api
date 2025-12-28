@@ -28,7 +28,7 @@ public class PlaywrightConfig {
     private int retryWaitMs = 200;
 
     // Browser ayarları
-    private boolean headless = true;
+    private boolean headless = false;
     private String userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     private int viewportWidth = 1920;
     private int viewportHeight = 1080;
@@ -263,6 +263,7 @@ public class PlaywrightConfig {
         private String endDate = "#TextBoxEndDate, input[name*='TextBoxEndDate']";
         private String fundCodeFilter = "input[type='search'][aria-controls='table_general_info'], input[type='search'][aria-controls='table_fund_returns']";
         private String searchButton = "#ButtonSearchDates, input[name*='ButtonSearchDates'], input[value='Karşılaştır'], input[value='Görüntüle']";
+
         public String getStartDate() {
             return startDate;
         }

@@ -104,37 +104,35 @@ public class TefasServiceImpl implements TefasService {
         return Optional.of(new PagedResponse<>(pagedList, meta));
     }
 
-    // @Override
-    // public Optional<PagedResponse<FundPerformanceDto>> getFundPerformance(String
-    // code, LocalDate start, LocalDate end,
-    // Pageable pageable) {
-    // log.debug("TefasServiceImpl: getFundPerformance called with code=" + code + "
-    // and start=" + start + " and end="
-    // + end + " and pageable=" + pageable);
-    // if (code == null || code.isBlank())
-    // return Optional.empty();
+    @Override
+    public Optional<PagedResponse<FundPerformanceDto>> getFundPerformance(String code, LocalDate start, LocalDate end,
+            Pageable pageable) {
+        log.debug("TefasServiceImpl: getFundPerformance called with code=" + code + "and start=" + start + " and end="
+                + end + " and pageable=" + pageable);
+        if (code == null || code.isBlank())
+            return Optional.empty();
 
-    // String raw = fundsClient.fetchComparisonFundReturns(code.trim(), start, end);
-    // List<FundPerformanceDto> list = fundsClient.toPriceRows(n);
+        String raw = fundsClient.fetchFundPerformance(code.trim(), start, end);
+        List<FundPerformanceDto> list = fundsParser.toPerformanceDtos(raw);
 
-    // PaginationInfo pagination = calculatePaginationInfo(pageable, list);
+        PaginationInfo pagination = calculatePaginationInfo(pageable, list);
 
-    // List<FundPerformanceDto> pagedList;
+        List<FundPerformanceDto> pagedList;
 
-    // if (pagination.startIndex() >= pagination.totalElements) {
-    // pagedList = List.of();
-    // } else {
-    // pagedList = list.subList(pagination.startIndex(), pagination.endIndex());
-    // }
+        if (pagination.startIndex() >= pagination.totalElements) {
+            pagedList = List.of();
+        } else {
+            pagedList = list.subList(pagination.startIndex(), pagination.endIndex());
+        }
 
-    // PagedResponse.Meta meta = new PagedResponse.Meta(
-    // pageable.getPageNumber(),
-    // pageable.getPageSize(),
-    // pagination.totalElements(),
-    // pagination.totalPages());
+        PagedResponse.Meta meta = new PagedResponse.Meta(
+                pageable.getPageNumber(),
+                pageable.getPageSize(),
+                pagination.totalElements(),
+                pagination.totalPages());
 
-    // return Optional.of(new PagedResponse<>(pagedList, meta));
-    // }
+        return Optional.of(new PagedResponse<>(pagedList, meta));
+    }
 
     private <T> PaginationInfo calculatePaginationInfo(Pageable pageable, List<T> list) {
         int page = pageable.getPageNumber();
