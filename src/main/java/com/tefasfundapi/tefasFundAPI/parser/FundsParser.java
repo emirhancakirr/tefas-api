@@ -3,6 +3,8 @@ package com.tefasfundapi.tefasFundAPI.parser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tefasfundapi.tefasFundAPI.dto.FundDto;
+import com.tefasfundapi.tefasFundAPI.exception.TefasParseException;
+import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -20,16 +22,14 @@ public class FundsParser {
     public List<FundDto> toFunds(String rawJson) {
         try {
             if (rawJson == null || rawJson.trim().isEmpty()) {
-                throw new RuntimeException("FundsParser: Empty or null response from TEFAS API");
+                throw new TefasParseException("Empty or null response from TEFAS API");
             }
 
             // HTML response kontrolü (WAF engeli veya hata sayfası)
             String trimmed = rawJson.trim();
             if (trimmed.startsWith("<") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
-                String errorMsg = "FundsParser: Received HTML response instead of JSON. " +
-                        "This usually indicates a WAF block or server error. Response preview: " +
-                        (trimmed.length() > 500 ? trimmed.substring(0, 500) : trimmed);
-                throw new RuntimeException(errorMsg);
+                String preview = trimmed.length() > 500 ? trimmed.substring(0, 500) : trimmed;
+                throw new TefasWafBlockedException(preview);
             }
 
             // İlk 500 karakteri logla (debug için)
@@ -50,10 +50,12 @@ public class FundsParser {
                 out.add(mapOne(arr));
             }
             return out;
+        } catch (TefasParseException | TefasWafBlockedException e) {
+            // Re-throw parse/WAF exceptions as-is
+            throw e;
         } catch (Exception e) {
-            String errorMsg = "FundsParser: JSON parse failed. Response preview: " +
-                    (rawJson != null && rawJson.length() > 200 ? rawJson.substring(0, 200) : rawJson);
-            throw new RuntimeException(errorMsg, e);
+            String preview = rawJson != null && rawJson.length() > 200 ? rawJson.substring(0, 200) : rawJson;
+            throw new TefasParseException("JSON parse failed. Response preview: " + preview, e);
         }
     }
 
