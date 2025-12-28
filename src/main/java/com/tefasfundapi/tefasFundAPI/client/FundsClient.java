@@ -10,7 +10,9 @@ import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpServerErrorException.NotImplemented;
 
+import java.time.LocalDateTime;
 import java.util.*;
 
 /**
@@ -125,50 +127,31 @@ public class FundsClient {
      * gerçekte ne gönderiliyorsa birebir buraya yaz.
      * 
      */
-    public String fetchFundsJson(String query, List<String> codes) {
-        try (Playwright pw = Playwright.create()) {
-            try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions(config))) {
-                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
-                try {
-                    Page page = ctx.newPage();
-                    PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
+    // public String fetchFundsJson(String fundCode, LocalDateTime start, LocalDateTime end) {
+    //     try (Playwright pw = Playwright.create()) {
+    //         log.debug("fetchFundsJson started for fundCode{}, start={}, end={}", fundCode, start, end);
 
-                    // Sayfa yüklendikten sonra biraz bekle (WAF için)
-                    Thread.sleep(config.getPageLoadWaitMs());
+    //         BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
+    //                 .setHeadless(config.isHeadless());
 
-                    APIRequestContext api = createApiContext(pw, ctx, config.getComparisonReferer());
-                    try {
-                        String body = buildFundsFormBody(query, codes);
-                        APIResponse res = api.post(config.getComparisonApiEndpoint(),
-                                RequestOptions.create().setData(body));
-                        String text = res.text();
+    //                 try (Browser browser = pw.chromium().launch(launchOptions)){
+    //                     BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
+    //                     try {
+    //                         Page page = ctx.newPage();
 
-                        // HTML dönerse (WAF engeli) hata fırlat
-                        PlaywrightHelper.checkWafBlock(text);
-
-                        PlaywrightHelper.ensureOk(res, text);
-                        return text;
-                    } finally {
-                        api.dispose();
-                    }
-                } finally {
-                    ctx.close();
-                }
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new TefasClientException("TEFAS/FundsSearch interrupted", e);
-        } catch (TefasWafBlockedException e) {
-            // Re-throw WAF exceptions as-is
-            throw e;
-        } catch (TefasClientException e) {
-            // Re-throw client exceptions as-is
-            throw e;
-        } catch (Exception e) {
-            log.error("Unexpected error in fetchFundsJson", e);
-            throw new TefasClientException("TEFAS/FundsSearch çağrısı başarısız: " + e.getMessage(), e);
-        }
-    }
+    //                         return NotImplemented
+    //                     } catch (Exception e) {
+    //                         // TODO: handle exception
+    //                     }
+    //                 } catch (Exception e) {
+    //                     // TODO: handle exception
+    //                 }
+    //     } catch (Exception e) {
+    //         log.error("Unexpected error in fetchHistoryJson for fundCode={}, start={}, end={}", fundCode, start, end,
+    //                 e);
+    //         throw new TefasClientException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
+    //     }
+    // }
 
     /*
      * =======================================================================

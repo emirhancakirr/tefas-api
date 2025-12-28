@@ -261,9 +261,8 @@ public class PlaywrightConfig {
     public static class Selectors {
         private String startDate = "#TextBoxStartDate, input[name*='TextBoxStartDate']";
         private String endDate = "#TextBoxEndDate, input[name*='TextBoxEndDate']";
-        private String fundCodeFilter = "input[type='search'][aria-controls='table_general_info']";
-        private String searchButton = "#ButtonSearchDates, input[name*='ButtonSearchDates'], input[value='Görüntüle']";
-
+        private String fundCodeFilter = "input[type='search'][aria-controls='table_general_info'], input[type='search'][aria-controls='table_fund_returns']";
+        private String searchButton = "#ButtonSearchDates, input[name*='ButtonSearchDates'], input[value='Karşılaştır'], input[value='Görüntüle']";
         public String getStartDate() {
             return startDate;
         }
