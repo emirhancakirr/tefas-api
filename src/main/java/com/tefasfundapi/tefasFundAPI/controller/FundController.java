@@ -4,13 +4,18 @@ import com.tefasfundapi.tefasFundAPI.dto.FundDto;
 import com.tefasfundapi.tefasFundAPI.exception.FundNotFoundException;
 import com.tefasfundapi.tefasFundAPI.filter.FieldFilter;
 import com.tefasfundapi.tefasFundAPI.service.TefasService;
+
+import jakarta.validation.constraints.NotBlank;
+
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/v1/funds")
+@Validated
 public class FundController {
 
     private final TefasService tefasService;
@@ -21,7 +26,7 @@ public class FundController {
 
     // GET /v1/funds/{code}?fields=code,name,...
     @GetMapping("/{code}")
-    public ResponseEntity<?> getFund(@PathVariable String code,
+    public ResponseEntity<?> getFund(@PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
             @RequestParam(required = false, name = "fields") String fieldsCsv) {
         List<String> fields = FieldFilter.parse(fieldsCsv);
         FundDto fund = tefasService.getFund(code.trim(), fields)
