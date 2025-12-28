@@ -12,6 +12,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -83,7 +84,7 @@ public class TefasServiceImpl implements TefasService {
 
         int startIndex = page * size;
         int endIndex = Math.min(startIndex + size, totalElements);
-        List<PriceRowDto> pagedList = list.subList(startIndex, endIndex);
+        List<PriceRowDto> pagedList = startIndex >= totalElements ? new ArrayList<>() : list.subList(startIndex, endIndex);
 
         PagedResponse.Meta meta = new PagedResponse.Meta(page, size, totalElements, totalPages);
 
