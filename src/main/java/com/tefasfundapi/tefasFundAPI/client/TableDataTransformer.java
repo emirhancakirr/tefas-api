@@ -2,6 +2,9 @@ package com.tefasfundapi.tefasFundAPI.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tefasfundapi.tefasFundAPI.exception.TefasParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -16,6 +19,7 @@ import java.util.Map;
  * Handles date parsing, number parsing, and field name mapping.
  */
 public final class TableDataTransformer {
+    private static final Logger log = LoggerFactory.getLogger(TableDataTransformer.class);
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy");
@@ -27,7 +31,7 @@ public final class TableDataTransformer {
     /**
      * Transforms raw table data (from DOM) to API response format.
      * 
-     * @param rawJson Raw JSON string extracted from table DOM
+     * @param rawJson  Raw JSON string extracted from table DOM
      * @param fundCode Fund code to filter by (null to include all)
      * @return Transformed JSON string matching API response format
      * @throws RuntimeException if transformation fails
@@ -38,7 +42,7 @@ public final class TableDataTransformer {
             JsonNode rawData = root.get("data");
 
             if (rawData == null || !rawData.isArray()) {
-                throw new RuntimeException("Invalid raw JSON structure: missing or invalid 'data' array");
+                throw new TefasParseException("Invalid raw JSON structure: missing or invalid 'data' array");
             }
 
             List<Map<String, Object>> transformedData = new ArrayList<>();
@@ -55,16 +59,20 @@ public final class TableDataTransformer {
             Map<String, Object> result = Map.of("data", transformedData);
             String resultJson = MAPPER.writeValueAsString(result);
 
-            System.out.println("Transformed " + transformedData.size() + " rows to API format");
+            log.debug("Transformed {} rows to API format", transformedData.size());
             return resultJson;
 
+        } catch (TefasParseException e) {
+            // Re-throw parse exceptions as-is
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to transform raw table data: " + e.getMessage(), e);
+            throw new TefasParseException("Failed to transform raw table data: " + e.getMessage(), e);
         }
     }
 
     /**
-     * Determines if a row should be skipped (header row, invalid data, or fund code mismatch).
+     * Determines if a row should be skipped (header row, invalid data, or fund code
+     * mismatch).
      */
     private static boolean shouldSkipRow(JsonNode row, String fundCode) {
         String tarih = getTextValue(row, "tarih");
@@ -178,4 +186,3 @@ public final class TableDataTransformer {
         }
     }
 }
-

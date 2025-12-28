@@ -2,6 +2,11 @@ package com.tefasfundapi.tefasFundAPI.client;
 
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.LoadState;
+import com.tefasfundapi.tefasFundAPI.config.PlaywrightConfig;
+import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
+import com.tefasfundapi.tefasFundAPI.exception.TefasTimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -13,16 +18,13 @@ import java.time.format.DateTimeFormatter;
  */
 @Component
 public class HistoryClient {
-    private static final String BASE_URL = "https://www.tefas.gov.tr";
-    private static final String REFERER = BASE_URL + "/TarihselVeriler.aspx";
-    private static final String API = "/api/DB/BindHistoryInfo";
+    private static final Logger log = LoggerFactory.getLogger(HistoryClient.class);
 
-    // Form element selectors (based on actual TEFAS HTML structure)
-    private static final String SELECTOR_START_DATE = "#TextBoxStartDate, input[name*='TextBoxStartDate']";
-    private static final String SELECTOR_END_DATE = "#TextBoxEndDate, input[name*='TextBoxEndDate']";
-    private static final String SELECTOR_FUND_CODE_FILTER = "input[type='search'][aria-controls='table_general_info']";
-    private static final String SELECTOR_SEARCH_BUTTON = "#ButtonSearchDates, input[name*='ButtonSearchDates'], input[value='Görüntüle']";
-    private static final int ELEMENT_WAIT_TIMEOUT_MS = 10000;
+    private final PlaywrightConfig config;
+
+    public HistoryClient(PlaywrightConfig config) {
+        this.config = config;
+    }
 
     /**
      * Tek fon ve tarih aralığı için fiyat/NAV+diğer sütunlar JSON'u döner.
@@ -35,11 +37,12 @@ public class HistoryClient {
      */
     public String fetchHistoryJson(String fundCode, LocalDate start, LocalDate end) {
         try (Playwright pw = Playwright.create()) {
-            System.out.println("HistoryClient/fetchHistoryJson started");
-            // Launch browser in visible mode for debugging
-            BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions().setHeadless(true);
+            log.debug("fetchHistoryJson started for fundCode={}, start={}, end={}", fundCode, start, end);
+            // Launch browser with configuration
+            BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
+                    .setHeadless(config.isHeadless());
             try (Browser browser = pw.chromium().launch(launchOptions)) {
-                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions());
+                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
                 try {
                     Page page = ctx.newPage();
 
@@ -69,13 +72,16 @@ public class HistoryClient {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("TEFAS/fetchHistoryJson interrupted", e);
+            throw new TefasClientException("TEFAS/fetchHistoryJson interrupted", e);
         } catch (com.microsoft.playwright.TimeoutError e) {
-            throw new RuntimeException(
-                    "TEFAS/fetchHistoryJson timeout: Table data not loaded within timeout period. " + e.getMessage(),
-                    e);
+            throw new TefasTimeoutException("fetchHistoryJson", config.getElementWaitTimeoutMs(), e);
+        } catch (TefasClientException e) {
+            // Re-throw custom exceptions as-is
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
+            log.error("Unexpected error in fetchHistoryJson for fundCode={}, start={}, end={}", fundCode, start, end,
+                    e);
+            throw new TefasClientException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
         }
     }
 
@@ -87,10 +93,10 @@ public class HistoryClient {
         try {
             // Wait for filtered rows
             page.waitForSelector("tbody tr:not(.dataTables_empty)",
-                    new Page.WaitForSelectorOptions().setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
 
             // Wait for DataTables to fully render and apply filter
-            Thread.sleep(1000);
+            Thread.sleep(config.getTableDataExtractionWaitMs());
 
             // Extract raw data (simple JavaScript - just get text content)
             String rawJson = (String) page.evaluate("""
@@ -121,13 +127,13 @@ public class HistoryClient {
                     })();
                     """);
 
-            System.out.println("Raw extracted JSON length: " + rawJson.length());
+            log.debug("Raw extracted JSON length: {}", rawJson.length());
 
             // Transform using helper class
             return TableDataTransformer.transformToApiFormat(rawJson, fundCode);
 
         } catch (Exception e) {
-            throw new RuntimeException("Failed to extract table data: " + e.getMessage(), e);
+            throw new TefasClientException("Failed to extract table data: " + e.getMessage(), e);
         }
     }
 
@@ -135,7 +141,7 @@ public class HistoryClient {
      * Navigates to TEFAS page and waits for WAF challenge to complete.
      */
     private void navigateAndWaitForWaf(Page page) throws InterruptedException {
-        PlaywrightHelper.navigateForSession(page, REFERER);
+        PlaywrightHelper.navigateForSession(page, config.getHistoryReferer(), config);
         page.waitForLoadState(LoadState.NETWORKIDLE);
     }
 
@@ -145,12 +151,12 @@ public class HistoryClient {
      */
     private void setupRequestLogger(Page page) {
         page.onRequest(request -> {
-            if (request.url().contains(API)) {
-                System.out.println("\n=== REQUEST DEBUG ===");
-                System.out.println("URL: " + request.url());
-                System.out.println("Method: " + request.method());
-                System.out.println("Post Data: " + request.postData());
-                System.out.println("=====================\n");
+            if (request.url().contains(config.getHistoryApiEndpoint())) {
+                log.debug("=== REQUEST DEBUG ===");
+                log.debug("URL: {}", request.url());
+                log.debug("Method: {}", request.method());
+                log.debug("Post Data: {}", request.postData());
+                log.debug("====================");
             }
         });
     }
@@ -165,18 +171,19 @@ public class HistoryClient {
 
         try {
             // Wait for form elements to be visible
-            page.waitForSelector(SELECTOR_START_DATE,
-                    new Page.WaitForSelectorOptions().setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
+            page.waitForSelector(config.getSelectors().getStartDate(),
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
 
             // Fill start date (TextBoxStartDate)
-            fillInputField(page, SELECTOR_START_DATE, startDateStr, "Start Date");
+            PlaywrightHelper.fillInputField(page, config.getSelectors().getStartDate(), startDateStr, "Start Date",
+                    config);
 
             // Fill end date (TextBoxEndDate)
-            fillInputField(page, SELECTOR_END_DATE, endDateStr, "End Date");
+            PlaywrightHelper.fillInputField(page, config.getSelectors().getEndDate(), endDateStr, "End Date", config);
 
-            System.out.println("Date fields filled: startDate=" + startDateStr + ", endDate=" + endDateStr);
+            log.debug("Date fields filled: startDate={}, endDate={}", startDateStr, endDateStr);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to fill date fields: " + e.getMessage(), e);
+            throw new TefasClientException("Failed to fill date fields: " + e.getMessage(), e);
         }
     }
 
@@ -187,18 +194,18 @@ public class HistoryClient {
         try {
             // Wait for table structure
             page.waitForSelector("table tbody",
-                    new Page.WaitForSelectorOptions().setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
 
             // Wait for data rows to appear (not empty)
             page.waitForSelector("tbody tr:not(.dataTables_empty)",
-                    new Page.WaitForSelectorOptions().setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
 
             // Wait for at least one row with valid data (date format check)
             // Use evaluate with retry logic instead of waitForFunction
             long startTime = System.currentTimeMillis();
             boolean hasValidData = false;
 
-            while (!hasValidData && (System.currentTimeMillis() - startTime) < ELEMENT_WAIT_TIMEOUT_MS) {
+            while (!hasValidData && (System.currentTimeMillis() - startTime) < config.getElementWaitTimeoutMs()) {
                 Object result = page.evaluate("""
                         (function() {
                             const rows = document.querySelectorAll('tbody tr:not(.dataTables_empty)');
@@ -219,22 +226,24 @@ public class HistoryClient {
                 hasValidData = Boolean.TRUE.equals(result);
 
                 if (!hasValidData) {
-                    Thread.sleep(200); // Wait 200ms before retry
+                    Thread.sleep(config.getRetryWaitMs());
                 }
             }
 
             if (!hasValidData) {
-                throw new RuntimeException(
-                        "Table loaded but no valid data rows found after " + ELEMENT_WAIT_TIMEOUT_MS + "ms");
+                throw new TefasTimeoutException("waitForTableToLoad", config.getElementWaitTimeoutMs());
             }
 
             // Additional wait for DataTables to finish processing
-            Thread.sleep(1500);
+            Thread.sleep(config.getTableLoadWaitMs());
 
-            System.out.println("Table loaded successfully with data rows");
+            log.info("Table loaded successfully with data rows");
 
+        } catch (TefasTimeoutException e) {
+            // Re-throw timeout exceptions as-is
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to wait for table to load: " + e.getMessage(), e);
+            throw new TefasClientException("Failed to wait for table to load: " + e.getMessage(), e);
         }
     }
 
@@ -244,56 +253,25 @@ public class HistoryClient {
      */
     private void fillFundCodeFilter(Page page, String fundCode) {
         if (fundCode == null || fundCode.isBlank()) {
-            System.out.println("Fund code is empty, skipping filter");
+            log.debug("Fund code is empty, skipping filter");
             return;
         }
 
         try {
             // Wait for filter input to be available
-            page.waitForSelector(SELECTOR_FUND_CODE_FILTER,
-                    new Page.WaitForSelectorOptions().setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
+            page.waitForSelector(config.getSelectors().getFundCodeFilter(),
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
 
             // Fill fund code in filter/search input (DataTables filter)
-            fillInputField(page, SELECTOR_FUND_CODE_FILTER, fundCode.trim(), "Fund Code Filter");
+            PlaywrightHelper.fillInputField(page, config.getSelectors().getFundCodeFilter(), fundCode.trim(),
+                    "Fund Code Filter", config);
 
             // Wait for DataTables to apply the filter
-            Thread.sleep(1000);
+            Thread.sleep(config.getFilterApplyWaitMs());
 
-            System.out.println("Fund code filter filled: " + fundCode);
+            log.debug("Fund code filter filled: {}", fundCode);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to fill fund code filter: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Fills a single input field with retry logic.
-     * Uses first() to handle multiple matches (strict mode violation).
-     */
-    private void fillInputField(Page page, String selector, String value, String fieldName) {
-        try {
-            // Use first() to handle multiple matches (strict mode violation)
-            Locator locator = page.locator(selector).first();
-
-            // Wait for element to be visible
-            locator.waitFor(new Locator.WaitForOptions().setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
-
-            // Clear existing value first (watermark might be present)
-            locator.clear();
-            Thread.sleep(200);
-
-            // Fill the field
-            locator.fill(value);
-            Thread.sleep(300);
-
-            // Verify value was set
-            String actualValue = locator.inputValue();
-            if (!actualValue.equals(value)) {
-                System.out.println(
-                        "Warning: " + fieldName + " value mismatch. Expected: " + value + ", Got: " + actualValue);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to fill " + fieldName + " field with selector '" + selector + "': " + e.getMessage(), e);
+            throw new TefasClientException("Failed to fill fund code filter: " + e.getMessage(), e);
         }
     }
 
@@ -303,25 +281,26 @@ public class HistoryClient {
      */
     private void clickSearchButton(Page page) {
         try {
+            String searchButtonSelector = config.getSelectors().getSearchButton();
             // Wait for button to be visible and clickable
-            page.waitForSelector(SELECTOR_SEARCH_BUTTON,
+            page.waitForSelector(searchButtonSelector,
                     new Page.WaitForSelectorOptions()
-                            .setTimeout(ELEMENT_WAIT_TIMEOUT_MS));
+                            .setTimeout(config.getElementWaitTimeoutMs()));
 
             // Click the button
-            page.click(SELECTOR_SEARCH_BUTTON,
-                    new Page.ClickOptions().setTimeout(5000));
+            page.click(searchButtonSelector,
+                    new Page.ClickOptions().setTimeout(config.getButtonClickTimeoutMs()));
 
-            System.out.println("Clicked search button: " + SELECTOR_SEARCH_BUTTON);
-            Thread.sleep(500); // Wait for click to register
+            log.debug("Clicked search button: {}", searchButtonSelector);
+            Thread.sleep(config.getButtonClickWaitMs());
 
         } catch (Exception e) {
-            System.out.println("Warning: Could not click button with selector '" + SELECTOR_SEARCH_BUTTON + "': "
-                    + e.getMessage());
+            log.warn("Could not click button with selector '{}': {}", config.getSelectors().getSearchButton(),
+                    e.getMessage());
 
             // Fallback: Try JavaScript click on button with onclick handler
             try {
-                System.out.println("Trying JavaScript click fallback...");
+                log.debug("Trying JavaScript click fallback...");
                 boolean clicked = page.evaluate("""
                         (function() {
                             var btn = document.getElementById('ButtonSearchDates') ||
@@ -336,14 +315,14 @@ public class HistoryClient {
                         """).toString().equals("true");
 
                 if (clicked) {
-                    System.out.println("JavaScript click successful");
-                    Thread.sleep(500);
+                    log.debug("JavaScript click successful");
+                    Thread.sleep(config.getButtonClickWaitMs());
                 } else {
-                    throw new RuntimeException("Could not find or click search button");
+                    throw new TefasClientException("Could not find or click search button");
                 }
             } catch (Exception jsError) {
-                throw new RuntimeException("Failed to click search button: " + e.getMessage() +
-                        ", JavaScript fallback also failed: " + jsError.getMessage(), e);
+                throw new TefasClientException("Failed to click search button: " + e.getMessage() +
+                        ", JavaScript fallback also failed: " + jsError.getMessage(), jsError);
             }
         }
     }

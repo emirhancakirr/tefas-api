@@ -2,6 +2,12 @@ package com.tefasfundapi.tefasFundAPI.client;
 
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.LoadState;
+import com.tefasfundapi.tefasFundAPI.config.PlaywrightConfig;
+import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
+import com.tefasfundapi.tefasFundAPI.exception.TefasNavigationException;
+import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -13,8 +19,7 @@ import java.util.Map;
  * DRY prensibi: Tekrar eden kodları buraya topladık.
  */
 public final class PlaywrightHelper {
-
-    private static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    private static final Logger log = LoggerFactory.getLogger(PlaywrightHelper.class);
 
     private PlaywrightHelper() {
         // Utility class - instantiate edilemez
@@ -23,43 +28,50 @@ public final class PlaywrightHelper {
     /**
      * Standart browser launch options oluşturur.
      * Bot detection'ı bypass etmek için gerekli ayarları içerir.
+     * 
+     * @param config Playwright konfigürasyonu
+     * @return BrowserType.LaunchOptions
      */
-    public static BrowserType.LaunchOptions createLaunchOptions() {
+    public static BrowserType.LaunchOptions createLaunchOptions(PlaywrightConfig config) {
         return new BrowserType.LaunchOptions()
-                .setHeadless(true)
+                .setHeadless(config.isHeadless())
                 .setArgs(List.of("--disable-blink-features=AutomationControlled"));
     }
 
     /**
      * Standart browser context options oluşturur.
      * Gerçekçi browser ayarları (User-Agent, viewport, locale, timezone) içerir.
+     * 
+     * @param config Playwright konfigürasyonu
+     * @return Browser.NewContextOptions
      */
-    public static Browser.NewContextOptions createContextOptions() {
+    public static Browser.NewContextOptions createContextOptions(PlaywrightConfig config) {
         return new Browser.NewContextOptions()
-                .setUserAgent(USER_AGENT)
-                .setViewportSize(1920, 1080)
-                .setLocale("tr-TR")
-                .setTimezoneId("Europe/Istanbul");
+                .setUserAgent(config.getUserAgent())
+                .setViewportSize(config.getViewportWidth(), config.getViewportHeight())
+                .setLocale(config.getLocale())
+                .setTimezoneId(config.getTimezone());
     }
 
     /**
      * WAF/oturum için sayfaya gidip network idle bekler.
      * TEFAS'ın WAF korumasını bypass etmek için session oluşturur.
      * 
-     * @param page Playwright Page objesi
-     * @param url  Navigate edilecek URL
+     * @param page   Playwright Page objesi
+     * @param url    Navigate edilecek URL
+     * @param config Playwright konfigürasyonu
      * @throws RuntimeException Navigation başarısız olursa
      */
-    public static void navigateForSession(Page page, String url) {
+    public static void navigateForSession(Page page, String url, PlaywrightConfig config) {
         try {
             page.navigate(url);
             // LOAD durumu: Sayfa yüklendi, tüm kaynaklar indirilmedi de olabilir
             page.waitForLoadState(LoadState.LOAD,
-                    new Page.WaitForLoadStateOptions().setTimeout(30_000));
+                    new Page.WaitForLoadStateOptions().setTimeout(config.getNavigationTimeoutMs()));
             // WAF için daha uzun bekleme
-            page.waitForTimeout(10000);
+            page.waitForTimeout(config.getWafWaitMs());
         } catch (Exception e) {
-            throw new RuntimeException("Failed to navigate to " + url + ": " + e.getMessage(), e);
+            throw new TefasNavigationException(url, e);
         }
     }
 
@@ -73,10 +85,10 @@ public final class PlaywrightHelper {
     public static void ensureOk(APIResponse response, String body) {
         int status = response.status();
         if (status == 401 || status == 403) {
-            throw new RuntimeException("Unauthorized/Forbidden: " + status);
+            throw new TefasClientException("Unauthorized/Forbidden: " + status);
         }
         if (status < 200 || status >= 300) {
-            throw new RuntimeException("Upstream " + status + " " + response.statusText() + " body=" + body);
+            throw new TefasClientException("Upstream " + status + " " + response.statusText() + " body=" + body);
         }
     }
 
@@ -101,7 +113,7 @@ public final class PlaywrightHelper {
             String preview = responseText.length() > 500
                     ? responseText.substring(0, 500)
                     : responseText;
-            throw new RuntimeException("TEFAS WAF blocked the request. Response: " + preview);
+            throw new TefasWafBlockedException(preview);
         }
     }
 
@@ -265,12 +277,51 @@ public final class PlaywrightHelper {
         // Status kontrolü
         int status = response.status();
         if (status == 401 || status == 403) {
-            throw new RuntimeException("Unauthorized/Forbidden: " + status);
+            throw new TefasClientException("Unauthorized/Forbidden: " + status);
         }
         if (status < 200 || status >= 300) {
-            throw new RuntimeException("Upstream error " + status + " " + response.statusText());
+            throw new TefasClientException("Upstream error " + status + " " + response.statusText());
         }
 
         return text;
+    }
+
+    /**
+     * Fills a single input field with retry logic and validation.
+     * Uses first() to handle multiple matches (strict mode violation).
+     * 
+     * @param page      Playwright Page objesi
+     * @param selector  CSS selector for the input field
+     * @param value     Value to fill
+     * @param fieldName Field name for logging purposes
+     * @param config    Playwright configuration
+     * @throws RuntimeException if filling fails
+     */
+    public static void fillInputField(Page page, String selector, String value, String fieldName,
+            PlaywrightConfig config) {
+        try {
+            // Use first() to handle multiple matches (strict mode violation)
+            Locator locator = page.locator(selector).first();
+
+            // Wait for element to be visible
+            locator.waitFor(new Locator.WaitForOptions().setTimeout(config.getElementWaitTimeoutMs()));
+
+            // Clear existing value first (watermark might be present)
+            locator.clear();
+            Thread.sleep(config.getInputClearWaitMs());
+
+            // Fill the field
+            locator.fill(value);
+            Thread.sleep(config.getInputFillWaitMs());
+
+            // Verify value was set
+            String actualValue = locator.inputValue();
+            if (!actualValue.equals(value)) {
+                log.warn("{} value mismatch. Expected: {}, Got: {}", fieldName, value, actualValue);
+            }
+        } catch (Exception e) {
+            throw new TefasClientException(
+                    "Failed to fill " + fieldName + " field with selector '" + selector + "': " + e.getMessage(), e);
+        }
     }
 }

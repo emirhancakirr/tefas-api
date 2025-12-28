@@ -1,15 +1,17 @@
 package com.tefasfundapi.tefasFundAPI.parser;
 
-import org.springframework.stereotype.Component;
-
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tefasfundapi.tefasFundAPI.dto.PriceRowDto;
-import java.util.List;
-import java.util.ArrayList;
-import com.fasterxml.jackson.databind.JsonNode;
-import java.time.LocalDate;
+import com.tefasfundapi.tefasFundAPI.exception.TefasParseException;
+import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
+import org.springframework.stereotype.Component;
+
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 
 /*
  Örnek JSON:
@@ -33,14 +35,13 @@ public class HistoryParser {
     public List<PriceRowDto> toPriceRows(String rawJson) {
         try {
             if (rawJson == null || rawJson.trim().isEmpty()) {
-                throw new RuntimeException("HistoryParser: Empty or null response from TEFAS API");
+                throw new TefasParseException("Empty or null response from TEFAS API");
             }
 
             String trimmed = rawJson.trim();
             if (trimmed.startsWith("<") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
-                throw new RuntimeException("HistoryParser: Received HTML response instead of JSON. " +
-                        "This usually indicates a WAF block or server error. Response preview: " +
-                        (trimmed.length() > 500 ? trimmed.substring(0, 500) : trimmed));
+                String preview = trimmed.length() > 500 ? trimmed.substring(0, 500) : trimmed;
+                throw new TefasWafBlockedException(preview);
             }
 
             JsonNode root = MAPPER.readTree(rawJson);
@@ -48,7 +49,7 @@ public class HistoryParser {
                     : (root.has("data") ? root.get("data") : null);
 
             if (arr == null) {
-                throw new RuntimeException("HistoryParser: No 'data' array found in response");
+                throw new TefasParseException("No 'data' array found in response");
             }
 
             List<PriceRowDto> out = new ArrayList<>();
@@ -61,9 +62,12 @@ public class HistoryParser {
             }
             return out;
 
+        } catch (TefasParseException | TefasWafBlockedException e) {
+            // Re-throw parse/WAF exceptions as-is
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("HistoryParser: JSON parse failed. Response preview: " +
-                    (rawJson != null && rawJson.length() > 200 ? rawJson.substring(0, 200) : rawJson), e);
+            String preview = rawJson != null && rawJson.length() > 200 ? rawJson.substring(0, 200) : rawJson;
+            throw new TefasParseException("JSON parse failed. Response preview: " + preview, e);
         }
 
     }

@@ -3,72 +3,58 @@ package com.tefasfundapi.tefasFundAPI.client;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.RequestOptions;
+import com.tefasfundapi.tefasFundAPI.config.PlaywrightConfig;
+import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
 import org.springframework.stereotype.Component;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
 public class ComparisonClient {
-    private static final String BASE_URL = "https://www.tefas.gov.tr";
-    private static final String REFERER = BASE_URL + "/FonKarsilastirma.aspx";
-    private static final String API = "/api/DB/BindComparisonFundReturns";
+    private final PlaywrightConfig config;
 
-    private static final Map<String, String> DEFAULT_HEADERS = Map.of(
-            "Origin", BASE_URL,
-            "Referer", REFERER,
-            "X-Requested-With", "XMLHttpRequest",
-            "Accept", "application/json, text/javascript, */*; q=0.01",
-            "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+    public ComparisonClient(PlaywrightConfig config) {
+        this.config = config;
+    }
 
-    /** periods veya start-end’e göre (aynı uç) performans/changes JSON’u döner. */
+    private Map<String, String> getDefaultHeaders() {
+        return Map.of(
+                "Origin", config.getBaseUrl(),
+                "Referer", config.getComparisonReferer(),
+                "X-Requested-With", "XMLHttpRequest",
+                "Accept", "application/json, text/javascript, */*; q=0.01",
+                "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+    }
+
+    /** periods veya start-end'e göre (aynı uç) performans/changes JSON'u döner. */
     public String postComparisonForm(Map<String, String> formParams) {
         try (Playwright pw = Playwright.create();
-                Browser browser = pw.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
-                BrowserContext ctx = browser.newContext()) {
+                Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions(config));
+                BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config))) {
 
             Page page = ctx.newPage();
-            page.navigate(REFERER);
+            PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
             page.waitForLoadState(LoadState.NETWORKIDLE);
 
             APIRequestContext api = pw.request().newContext(
                     new APIRequest.NewContextOptions()
-                            .setBaseURL(BASE_URL)
+                            .setBaseURL(config.getBaseUrl())
                             .setStorageState(ctx.storageState())
-                            .setExtraHTTPHeaders(DEFAULT_HEADERS));
+                            .setExtraHTTPHeaders(getDefaultHeaders()));
             try {
-                String body = toFormEncoded(formParams);
-                APIResponse res = api.post(API, RequestOptions.create().setData(body));
+                String body = PlaywrightHelper.toFormEncoded(formParams);
+                APIResponse res = api.post(config.getComparisonApiEndpoint(), RequestOptions.create().setData(body));
                 String text = res.text();
-                ensureOk(res, text);
+                PlaywrightHelper.ensureOk(res, text);
                 return text;
             } finally {
                 api.dispose();
             }
+        } catch (TefasClientException e) {
+            // Re-throw custom exceptions as-is
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("ComparisonClient çağrısı başarısız: " + e.getMessage(), e);
+            throw new TefasClientException("ComparisonClient çağrısı başarısız: " + e.getMessage(), e);
         }
-    }
-
-    private static void ensureOk(APIResponse res, String body) {
-        int s = res.status();
-        if (s == 401 || s == 403)
-            throw new RuntimeException("Unauthorized/Forbidden: " + s);
-        if (s < 200 || s >= 300)
-            throw new RuntimeException("Upstream " + s + " " + res.statusText() + " body=" + body);
-    }
-
-    private static String toFormEncoded(Map<String, String> form) {
-        StringBuilder sb = new StringBuilder();
-        for (var e : form.entrySet()) {
-            if (sb.length() > 0)
-                sb.append('&');
-            sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
-                    .append('=')
-                    .append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), StandardCharsets.UTF_8));
-        }
-        return sb.toString();
     }
 }
