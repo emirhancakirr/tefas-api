@@ -7,6 +7,8 @@ import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasNavigationException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasTimeoutException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
+import java.util.concurrent.TimeoutException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,6 +18,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BlockingDeque;
 
 /**
  * Playwright ile TEFAS API çağrıları için ortak utility metodları.
@@ -100,6 +103,235 @@ public final class PlaywrightHelper {
             log.debug("Date fields filled: startDate={}, endDate={}", startDateStr, endDateStr);
         } catch (Exception e) {
             throw new TefasClientException("Failed to fill date fields: " + e.getMessage(), e);
+        }
+    }
+
+    // PlaywrightHelper.java - clickSearchButton metodundan sonra ekle (satır
+    // 211'den sonra)
+
+    // ==================== Response Waiting ====================
+
+    // PlaywrightHelper.java:124-180 - waitForApiResponse metodunu güncelle
+    // PlaywrightHelper.java - waitForApiResponse'dan önce ekle
+
+    /**
+     * Sets up the response listener for a specific endpoint.
+     * Must be called BEFORE triggering the action that will cause the API call.
+     * 
+     * @param page     Playwright Page objesi
+     * @param endpoint API endpoint URL pattern
+     * @param config   Playwright konfigürasyonu
+     * @return BlockingQueue that will collect responses
+     */
+    public static java.util.concurrent.BlockingQueue<Response> setupResponseListener(
+            Page page,
+            String endpoint,
+            PlaywrightConfig config) {
+        log.info("🔧 Setting up response listener for endpoint: {}", endpoint);
+
+        // Response'ları toplamak için queue
+        java.util.concurrent.BlockingQueue<Response> responseQueue = new java.util.concurrent.LinkedBlockingQueue<>();
+        log.info("✅ Response listener queue created. Waiting for responses...");
+
+        // Response listener - tüm response'ları topla
+        page.onResponse(response -> {
+            String url = response.url();
+            int status = response.status();
+            String method = response.request().method();
+
+            // 🔍 DEBUG: Tüm response'ları logla (özellikle POST ve API endpoint'leri)
+            if (method.equals("POST") || url.contains("/api/") || url.contains("BindComparison")) {
+                log.info("🔍 Response received: URL={}, Status={}, Method={}", url, status, method);
+            } else {
+                log.debug("Response received: URL={}, Status={}, Method={}", url, status, method);
+            }
+
+            // Endpoint kontrolü - daha esnek matching
+            // endpoint="/api/DB/BindComparisonFundReturns" ama URL tam URL olabilir
+            boolean matchesEndpoint = url.contains(endpoint) ||
+                    url.endsWith(endpoint) ||
+                    url.contains("BindComparisonFundReturns") ||
+                    (url.contains("/api/DB/") && url.contains("BindComparison"));
+
+            if (matchesEndpoint) {
+                log.info("✅ Matching endpoint found! URL={}, Status={}, Method={}", url, status, method);
+
+                // POST endpoint'i kontrol et - tüm 2xx status kodları kabul et
+                if (status >= 200 && status < 300) {
+                    log.info("✅ Valid response (status {}) - adding to queue", status);
+                    try {
+                        // ⚠️ ÖNEMLİ: response.text() sadece bir kez çağrılabilir!
+                        // Body'yi burada okumayalım, waitForApiResponse içinde okuyalım
+                        // Sadece response'u queue'ya ekle
+                        boolean added = responseQueue.offer(response);
+                        log.info("✅ Response added to queue: {}, Queue size: {}", added, responseQueue.size());
+                    } catch (Exception e) {
+                        log.error("❌ Failed to add response to queue: {}", e.getMessage(), e);
+                    }
+                } else {
+                    log.warn("❌ Response status is not 2xx: status={} (URL: {})", status, url);
+                    // Status code'u logla - belki 401, 403, 500 gibi bir hata var
+                    try {
+                        String errorBody = response.text();
+                        log.warn("❌ Error response body (first 500 chars): {}",
+                                errorBody != null && errorBody.length() > 500
+                                        ? errorBody.substring(0, 500) + "..."
+                                        : errorBody);
+                    } catch (Exception e) {
+                        log.warn("Could not read error response body: {}", e.getMessage());
+                    }
+                }
+            } else {
+                // Sadece POST ve API endpoint'leri için log
+                if (method.equals("POST") && url.contains("/api/")) {
+                    log.debug("Response URL doesn't match endpoint: {} (looking for: {})", url, endpoint);
+                }
+            }
+        });
+
+        // 🔍 DEBUG: Request'leri de logla
+        page.onRequest(request -> {
+            String url = request.url();
+            if (url.contains(endpoint) || url.contains("BindComparisonFundReturns")) {
+                log.info("✅ Request detected: URL={}, Method={}, PostData={}",
+                        url, request.method(), request.postData());
+            }
+        });
+
+        return responseQueue;
+    }
+
+    /**
+     * Waits for a non-empty response from the queue.
+     * Must be called AFTER setupResponseListener and AFTER triggering the action.
+     * 
+     * @param responseQueue Queue that collects responses (from
+     *                      setupResponseListener)
+     * @param endpoint      API endpoint URL pattern (for logging)
+     * @param config        Playwright konfigürasyonu
+     * @return Response body as string (non-empty)
+     * @throws TefasTimeoutException if no non-empty response arrives within timeout
+     * @throws TefasClientException  if waiting fails
+     */
+    public static String waitForApiResponse(
+            java.util.concurrent.BlockingQueue<Response> responseQueue,
+            String endpoint,
+            PlaywrightConfig config) {
+        try {
+            log.debug("Waiting for non-empty API response from POST endpoint: {}", endpoint);
+            log.debug("Queue size at start: {}", responseQueue.size());
+
+            // Timeout kontrolü için
+            // Response 11+ saniye sonra gelebiliyor, bu yüzden timeout'u biraz artırıyoruz
+            long startTime = System.currentTimeMillis();
+            long timeoutMs = Math.max(config.getElementWaitTimeoutMs(), 15000); // En az 15 saniye
+            log.debug("Using timeout: {} ms", timeoutMs);
+
+            // Dolu response bulana kadar bekle
+            while (System.currentTimeMillis() - startTime < timeoutMs) {
+                long remainingTime = timeoutMs - (System.currentTimeMillis() - startTime);
+                log.debug("Polling queue... (remaining: {} ms, queue size: {})", remainingTime, responseQueue.size());
+
+                Response response = responseQueue.poll(
+                        Math.max(1000, remainingTime),
+                        java.util.concurrent.TimeUnit.MILLISECONDS);
+
+                if (response == null) {
+                    // Timeout oldu, ama queue'da response var mı kontrol et (non-blocking)
+                    response = responseQueue.poll(); // Non-blocking poll
+                    if (response == null) {
+                        log.warn("❌ No response in queue after polling. Queue size: {}", responseQueue.size());
+                        // Gerçekten timeout - dolu response bulunamadı
+                        throw new TefasTimeoutException(
+                                "waitForApiResponse",
+                                timeoutMs,
+                                new Exception("No non-empty response received from endpoint: " + endpoint));
+                    } else {
+                        log.info("✅ Response found in queue after timeout check! Queue size: {}", responseQueue.size());
+                    }
+                }
+
+                log.debug("✅ Response found in queue! Processing...");
+
+                // Response body'yi al
+                String body;
+                try {
+                    body = response.text();
+                    log.debug("Response body length: {}", body != null ? body.length() : 0);
+                } catch (Exception e) {
+                    log.warn("Failed to read response body: {}, trying next response", e.getMessage());
+                    continue;
+                }
+
+                // Boş response kontrolü
+                if (body == null || body.trim().isEmpty()) {
+                    log.debug("❌ Empty response received, waiting for next response...");
+                    continue;
+                }
+
+                // Empty array kontrolü
+                String trimmedBody = body.trim();
+                if (trimmedBody.equals("[]")) {
+                    log.debug("❌ Empty array response received, waiting for next response...");
+                    continue;
+                }
+
+                // Error kontrolü
+                if (trimmedBody.startsWith("{")) {
+                    if (trimmedBody.contains("\"error\"") || trimmedBody.contains("\"Error\"")) {
+                        log.warn("❌ API response contains error: {}",
+                                trimmedBody.length() > 200 ? trimmedBody.substring(0, 200) + "..." : trimmedBody);
+                        continue;
+                    }
+                }
+
+                // Dolu response bulundu!
+                log.info("✅ Non-empty API response received from {}: {} bytes", endpoint, body.length());
+                return body;
+            }
+
+            // Timeout - ama queue'da response var mı son bir kontrol
+            // Response async geldiği için bir süre daha bekleyelim
+            log.warn("⚠️ Timeout reached, but checking queue one more time... Queue size: {}", responseQueue.size());
+
+            // Response'ın gelmesi için 2 saniye daha bekle
+            for (int i = 0; i < 20; i++) { // 20 x 100ms = 2 saniye
+                Response finalResponse = responseQueue.poll(); // Non-blocking
+                if (finalResponse != null) {
+                    log.info("✅ Response found in queue after timeout! Processing...");
+                    try {
+                        String body = finalResponse.text();
+                        if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
+                            log.info("✅ Non-empty API response received from {}: {} bytes", endpoint, body.length());
+                            return body;
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to read final response body: {}", e.getMessage());
+                    }
+                }
+                try {
+                    Thread.sleep(100); // 100ms bekle
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            log.error("❌ Timeout reached! Queue size: {}", responseQueue.size());
+            throw new TefasTimeoutException(
+                    "waitForApiResponse",
+                    timeoutMs,
+                    new Exception("No non-empty response received from endpoint: " + endpoint + " within timeout"));
+
+        } catch (TefasTimeoutException e) {
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new TefasClientException("Interrupted while waiting for API response", e);
+        } catch (Exception e) {
+            throw new TefasClientException(
+                    "Failed to wait for API response from " + endpoint + ": " + e.getMessage(),
+                    e);
         }
     }
 

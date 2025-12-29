@@ -141,15 +141,20 @@ public class FundsClient {
 
                     PlaywrightHelper.setupRequestLogger(page, config.getComparisonApiEndpoint());
                     PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
-                    PlaywrightHelper.fillDateFields(page, start, end, config);
 
-                    // TO-DO fix fillfundCodeFilter and look why it
-                    PlaywrightHelper.fillFundCodeFilter(page, fundCode, config,
-                            "input[type='search'][aria-controls='table_fund_returns']");
+                    PlaywrightHelper.fillDateFields(page, start, end, config);
+                    java.util.concurrent.BlockingQueue<Response> responseQueue = PlaywrightHelper
+                            .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
+
                     PlaywrightHelper.clickSearchButton(page, config);
-                    PlaywrightHelper.waitForFundReturnsTable(page, config);
-                    String tablejson = extractFundReturnsTableData(page, fundCode, config);
-                    return tablejson;
+                    // API çağrısının başlaması için kısa bir bekleme
+                    Thread.sleep(1000);
+
+                    String apiResponse = PlaywrightHelper.waitForApiResponse(responseQueue,
+                            config.getComparisonApiEndpoint(), config);
+
+                    log.debug("API response received, response length: {}", apiResponse.length());
+                    return apiResponse;
 
                 } finally {
                     ctx.close();
