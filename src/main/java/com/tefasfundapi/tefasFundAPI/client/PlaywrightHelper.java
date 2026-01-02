@@ -123,78 +123,65 @@ public final class PlaywrightHelper {
      * @param config   Playwright konfigürasyonu
      * @return BlockingQueue that will collect responses
      */
-    public static java.util.concurrent.BlockingQueue<Response> setupResponseListener(
+    /**
+     * Response wrapper class to cache the body since Playwright Response.text() can
+     * only be called once.
+     */
+    public static class ResponseWithBody {
+        private final Response response;
+        private final String body;
+        private final String url;
+        private final int status;
+
+        public ResponseWithBody(Response response, String body) {
+            this.response = response;
+            this.body = body;
+            this.url = response.url();
+            this.status = response.status();
+        }
+
+        public String getBody() {
+            return body;
+        }
+
+        public String url() {
+            return url;
+        }
+
+        public int status() {
+            return status;
+        }
+
+        public Response getResponse() {
+            return response;
+        }
+    }
+
+    public static java.util.concurrent.BlockingQueue<ResponseWithBody> setupResponseListener(
             Page page,
             String endpoint,
             PlaywrightConfig config) {
-        log.info("🔧 Setting up response listener for endpoint: {}", endpoint);
+        log.info("Setting up response listener for endpoint: {}", endpoint);
 
-        // Response'ları toplamak için queue
-        java.util.concurrent.BlockingQueue<Response> responseQueue = new java.util.concurrent.LinkedBlockingQueue<>();
-        log.info("✅ Response listener queue created. Waiting for responses...");
+        java.util.concurrent.BlockingQueue<ResponseWithBody> responseQueue = new java.util.concurrent.LinkedBlockingQueue<>();
 
-        // Response listener - tüm response'ları topla
         page.onResponse(response -> {
             String url = response.url();
             int status = response.status();
-            String method = response.request().method();
 
-            // 🔍 DEBUG: Tüm response'ları logla (özellikle POST ve API endpoint'leri)
-            if (method.equals("POST") || url.contains("/api/") || url.contains("BindComparison")) {
-                log.info("🔍 Response received: URL={}, Status={}, Method={}", url, status, method);
-            } else {
-                log.debug("Response received: URL={}, Status={}, Method={}", url, status, method);
-            }
+            // Sadece status 200 ve endpoint match eden response'ları al
+            boolean matchesEndpoint = url.contains(endpoint) || url.contains("BindComparisonFundReturns");
 
-            // Endpoint kontrolü - daha esnek matching
-            // endpoint="/api/DB/BindComparisonFundReturns" ama URL tam URL olabilir
-            boolean matchesEndpoint = url.contains(endpoint) ||
-                    url.endsWith(endpoint) ||
-                    url.contains("BindComparisonFundReturns") ||
-                    (url.contains("/api/DB/") && url.contains("BindComparison"));
-
-            if (matchesEndpoint) {
-                log.info("✅ Matching endpoint found! URL={}, Status={}, Method={}", url, status, method);
-
-                // POST endpoint'i kontrol et - tüm 2xx status kodları kabul et
-                if (status >= 200 && status < 300) {
-                    log.info("✅ Valid response (status {}) - adding to queue", status);
-                    try {
-                        // ⚠️ ÖNEMLİ: response.text() sadece bir kez çağrılabilir!
-                        // Body'yi burada okumayalım, waitForApiResponse içinde okuyalım
-                        // Sadece response'u queue'ya ekle
-                        boolean added = responseQueue.offer(response);
-                        log.info("✅ Response added to queue: {}, Queue size: {}", added, responseQueue.size());
-                    } catch (Exception e) {
-                        log.error("❌ Failed to add response to queue: {}", e.getMessage(), e);
-                    }
-                } else {
-                    log.warn("❌ Response status is not 2xx: status={} (URL: {})", status, url);
-                    // Status code'u logla - belki 401, 403, 500 gibi bir hata var
-                    try {
-                        String errorBody = response.text();
-                        log.warn("❌ Error response body (first 500 chars): {}",
-                                errorBody != null && errorBody.length() > 500
-                                        ? errorBody.substring(0, 500) + "..."
-                                        : errorBody);
-                    } catch (Exception e) {
-                        log.warn("Could not read error response body: {}", e.getMessage());
-                    }
+            if (matchesEndpoint && status == 200) {
+                try {
+                    String body = response.text();
+                    ResponseWithBody responseWithBody = new ResponseWithBody(response, body);
+                    responseQueue.offer(responseWithBody);
+                    log.info("Response received: URL={}, Status={}, Body length={}",
+                            url, status, body != null ? body.length() : 0);
+                } catch (Exception e) {
+                    log.error("Failed to read response body: {}", e.getMessage(), e);
                 }
-            } else {
-                // Sadece POST ve API endpoint'leri için log
-                if (method.equals("POST") && url.contains("/api/")) {
-                    log.debug("Response URL doesn't match endpoint: {} (looking for: {})", url, endpoint);
-                }
-            }
-        });
-
-        // 🔍 DEBUG: Request'leri de logla
-        page.onRequest(request -> {
-            String url = request.url();
-            if (url.contains(endpoint) || url.contains("BindComparisonFundReturns")) {
-                log.info("✅ Request detected: URL={}, Method={}, PostData={}",
-                        url, request.method(), request.postData());
             }
         });
 
@@ -209,131 +196,70 @@ public final class PlaywrightHelper {
      *                      setupResponseListener)
      * @param endpoint      API endpoint URL pattern (for logging)
      * @param config        Playwright konfigürasyonu
-     * @return Response body as string (non-empty)
+     * @return Response body as string (non-empty)ç
      * @throws TefasTimeoutException if no non-empty response arrives within timeout
      * @throws TefasClientException  if waiting fails
      */
+    //To-do:Fix race condition in waitForApiResponse: responses are being added to the queue but the method times out before reading them, likely due to timing issues between button click and response polling.
     public static String waitForApiResponse(
-            java.util.concurrent.BlockingQueue<Response> responseQueue,
-            String endpoint,
-            PlaywrightConfig config) {
-        try {
-            log.debug("Waiting for non-empty API response from POST endpoint: {}", endpoint);
-            log.debug("Queue size at start: {}", responseQueue.size());
-
-            // Timeout kontrolü için
-            // Response 11+ saniye sonra gelebiliyor, bu yüzden timeout'u biraz artırıyoruz
-            long startTime = System.currentTimeMillis();
-            long timeoutMs = Math.max(config.getElementWaitTimeoutMs(), 15000); // En az 15 saniye
-            log.debug("Using timeout: {} ms", timeoutMs);
-
-            // Dolu response bulana kadar bekle
-            while (System.currentTimeMillis() - startTime < timeoutMs) {
-                long remainingTime = timeoutMs - (System.currentTimeMillis() - startTime);
-                log.debug("Polling queue... (remaining: {} ms, queue size: {})", remainingTime, responseQueue.size());
-
-                Response response = responseQueue.poll(
-                        Math.max(1000, remainingTime),
-                        java.util.concurrent.TimeUnit.MILLISECONDS);
-
-                if (response == null) {
-                    // Timeout oldu, ama queue'da response var mı kontrol et (non-blocking)
-                    response = responseQueue.poll(); // Non-blocking poll
-                    if (response == null) {
-                        log.warn("❌ No response in queue after polling. Queue size: {}", responseQueue.size());
-                        // Gerçekten timeout - dolu response bulunamadı
-                        throw new TefasTimeoutException(
-                                "waitForApiResponse",
-                                timeoutMs,
-                                new Exception("No non-empty response received from endpoint: " + endpoint));
-                    } else {
-                        log.info("✅ Response found in queue after timeout check! Queue size: {}", responseQueue.size());
-                    }
-                }
-
-                log.debug("✅ Response found in queue! Processing...");
-
-                // Response body'yi al
-                String body;
-                try {
-                    body = response.text();
-                    log.debug("Response body length: {}", body != null ? body.length() : 0);
-                } catch (Exception e) {
-                    log.warn("Failed to read response body: {}, trying next response", e.getMessage());
-                    continue;
-                }
-
-                // Boş response kontrolü
-                if (body == null || body.trim().isEmpty()) {
-                    log.debug("❌ Empty response received, waiting for next response...");
-                    continue;
-                }
-
-                // Empty array kontrolü
-                String trimmedBody = body.trim();
-                if (trimmedBody.equals("[]")) {
-                    log.debug("❌ Empty array response received, waiting for next response...");
-                    continue;
-                }
-
-                // Error kontrolü
-                if (trimmedBody.startsWith("{")) {
-                    if (trimmedBody.contains("\"error\"") || trimmedBody.contains("\"Error\"")) {
-                        log.warn("❌ API response contains error: {}",
-                                trimmedBody.length() > 200 ? trimmedBody.substring(0, 200) + "..." : trimmedBody);
-                        continue;
-                    }
-                }
-
-                // Dolu response bulundu!
-                log.info("✅ Non-empty API response received from {}: {} bytes", endpoint, body.length());
+        java.util.concurrent.BlockingQueue<ResponseWithBody> responseQueue,
+        String endpoint,
+        PlaywrightConfig config) {
+    try {
+        long startTime = System.currentTimeMillis();
+        long timeoutMs = Math.max(config.getElementWaitTimeoutMs(), 30000);
+        
+        // İlk birkaç saniye daha uzun bekle (API çağrısı başlaması için)
+        boolean firstPoll = true;
+        
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            long remainingTime = timeoutMs - (System.currentTimeMillis() - startTime);
+            
+            if (remainingTime < 500) {
+                break;
+            }
+            
+            // İlk poll'da daha uzun bekle (5 saniye), sonraki poll'larda 2 saniye
+            long pollTimeout = firstPoll ? Math.min(remainingTime, 5000) : Math.min(remainingTime, 2000);
+            
+            ResponseWithBody responseWithBody = responseQueue.poll(
+                    pollTimeout,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+            
+            firstPoll = false;
+            
+            if (responseWithBody == null) {
+                continue;
+            }
+            
+            String body = responseWithBody.getBody();
+            
+            if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
+                log.info("API response received: {} bytes", body.length());
                 return body;
             }
-
-            // Timeout - ama queue'da response var mı son bir kontrol
-            // Response async geldiği için bir süre daha bekleyelim
-            log.warn("⚠️ Timeout reached, but checking queue one more time... Queue size: {}", responseQueue.size());
-
-            // Response'ın gelmesi için 2 saniye daha bekle
-            for (int i = 0; i < 20; i++) { // 20 x 100ms = 2 saniye
-                Response finalResponse = responseQueue.poll(); // Non-blocking
-                if (finalResponse != null) {
-                    log.info("✅ Response found in queue after timeout! Processing...");
-                    try {
-                        String body = finalResponse.text();
-                        if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
-                            log.info("✅ Non-empty API response received from {}: {} bytes", endpoint, body.length());
-                            return body;
-                        }
-                    } catch (Exception e) {
-                        log.warn("Failed to read final response body: {}", e.getMessage());
-                    }
-                }
-                try {
-                    Thread.sleep(100); // 100ms bekle
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-
-            log.error("❌ Timeout reached! Queue size: {}", responseQueue.size());
-            throw new TefasTimeoutException(
-                    "waitForApiResponse",
-                    timeoutMs,
-                    new Exception("No non-empty response received from endpoint: " + endpoint + " within timeout"));
-
-        } catch (TefasTimeoutException e) {
-            throw e;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new TefasClientException("Interrupted while waiting for API response", e);
-        } catch (Exception e) {
-            throw new TefasClientException(
-                    "Failed to wait for API response from " + endpoint + ": " + e.getMessage(),
-                    e);
+            
+            continue;
         }
+        
+        // Son kontrol
+        ResponseWithBody finalResponse = responseQueue.poll();
+        if (finalResponse != null) {
+            String body = finalResponse.getBody();
+            if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
+                log.info("API response received after timeout: {} bytes", body.length());
+                return body;
+            }
+        }
+        
+        throw new TefasTimeoutException("waitForApiResponse timeout {}", timeoutMs);
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new TefasClientException("Interrupted while waiting for API response", e);
+    } catch (Exception e) {
+        throw new TefasClientException("Failed to wait for API response: " + e.getMessage(), e);
     }
+}
 
     /**
      * Fills the fund code filter input (DataTables search box).
@@ -399,22 +325,26 @@ public final class PlaywrightHelper {
     public static void clickSearchButton(Page page, PlaywrightConfig config) {
         try {
             String searchButtonSelector = config.getSelectors().getSearchButton();
+            log.info("🔘 Attempting to click search button with selector: {}", searchButtonSelector);
+
             page.waitForSelector(searchButtonSelector,
                     new Page.WaitForSelectorOptions()
                             .setTimeout(config.getElementWaitTimeoutMs()));
 
+            log.info("🔘 Button found, clicking...");
             page.click(searchButtonSelector,
                     new Page.ClickOptions().setTimeout(config.getButtonClickTimeoutMs()));
 
-            log.debug("Clicked search button: {}", searchButtonSelector);
+            log.info("✅ Search button clicked successfully: {}", searchButtonSelector);
             Thread.sleep(config.getButtonClickWaitMs());
+            log.info("✅ Waiting {} ms for API call to be triggered...", config.getButtonClickWaitMs());
 
         } catch (Exception e) {
-            log.warn("Could not click button with selector '{}': {}", config.getSelectors().getSearchButton(),
+            log.warn("⚠️ Could not click button with selector '{}': {}", config.getSelectors().getSearchButton(),
                     e.getMessage());
 
             try {
-                log.debug("Trying JavaScript click fallback...");
+                log.info("🔄 Trying JavaScript click fallback...");
                 boolean clicked = page.evaluate("""
                         (function() {
                             var btn = document.getElementById('ButtonSearchDates') ||
@@ -430,8 +360,9 @@ public final class PlaywrightHelper {
                         """).toString().equals("true");
 
                 if (clicked) {
-                    log.debug("JavaScript click successful");
+                    log.info("✅ JavaScript click successful");
                     Thread.sleep(config.getButtonClickWaitMs());
+                    log.info("✅ Waiting {} ms for API call to be triggered...", config.getButtonClickWaitMs());
                 } else {
                     throw new TefasClientException("Could not find or click search button");
                 }

@@ -143,13 +143,11 @@ public class FundsClient {
                     PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
 
                     PlaywrightHelper.fillDateFields(page, start, end, config);
-                    java.util.concurrent.BlockingQueue<Response> responseQueue = PlaywrightHelper
+                    java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
                             .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
 
                     PlaywrightHelper.clickSearchButton(page, config);
-                    // API çağrısının başlaması için kısa bir bekleme
-                    Thread.sleep(1000);
-
+                    Thread.sleep(2000);
                     String apiResponse = PlaywrightHelper.waitForApiResponse(responseQueue,
                             config.getComparisonApiEndpoint(), config);
 
