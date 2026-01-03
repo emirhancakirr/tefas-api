@@ -1,7 +1,6 @@
 package com.tefasfundapi.tefasFundAPI.client;
 
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.RequestOptions;
 import com.tefasfundapi.tefasFundAPI.config.PlaywrightConfig;
 import com.tefasfundapi.tefasFundAPI.dto.FundReturnQuery;
 import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
@@ -10,7 +9,6 @@ import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpServerErrorException.NotImplemented;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -28,14 +26,6 @@ public class FundsClient {
 
     public FundsClient(PlaywrightConfig config) {
         this.config = config;
-    }
-
-    private Map<String, String> getDefaultHeaders() {
-        return Map.of(
-                "Origin", config.getBaseUrl(),
-                "X-Requested-With", "XMLHttpRequest",
-                "Accept", "application/json, text/javascript, */*; q=0.01",
-                "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
     }
 
     /*
@@ -129,7 +119,7 @@ public class FundsClient {
      */
     public String fetchFundPerformance(String fundCode, LocalDate start, LocalDate end) {
         try (Playwright pw = Playwright.create()) {
-            log.debug("fetchFundsJson started for fundCode{}, start={}, end={}", fundCode, start, end);
+            log.debug("fetchFundPerformance started for fundCode={}, start={}, end={}", fundCode, start, end);
 
             BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
                     .setHeadless(false);
@@ -139,39 +129,49 @@ public class FundsClient {
                 try {
                     Page page = ctx.newPage();
 
-                    PlaywrightHelper.setupRequestLogger(page, config.getComparisonApiEndpoint());
-                    PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
-
-                    PlaywrightHelper.fillDateFields(page, start, end, config);
+                    // Setup response listener BEFORE any navigation
                     java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
                             .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
 
-                    PlaywrightHelper.clickSearchButton(page, config);
-                    Thread.sleep(2000);
-                    String apiResponse = PlaywrightHelper.waitForApiResponse(responseQueue,
-                            config.getComparisonApiEndpoint(), config);
+                    PlaywrightHelper.setupRequestLogger(page, config.getComparisonApiEndpoint());
+                    PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
+                    PlaywrightHelper.fillDateFields(page, start, end, config);
 
-                    log.debug("API response received, response length: {}", apiResponse.length());
+                    // Button'a tıkla
+                    PlaywrightHelper.clickSearchButton(page, config);
+
+                    // Tüm response'ları topla ve en sonuncuyu al
+                    // 2000ms = Son response'tan sonra 2 saniye daha bekle, başka response yoksa
+                    // bitir
+                    String apiResponse = PlaywrightHelper.waitForLastApiResponse(
+                            responseQueue,
+                            config.getComparisonApiEndpoint(),
+                            config,
+                            2000);
+
+                    // HTML dönerse (WAF engeli) hata fırlat
+                    if (apiResponse.trim().startsWith("<")) {
+                        String preview = apiResponse.length() > 500 ? apiResponse.substring(0, 500) : apiResponse;
+                        throw new TefasWafBlockedException(preview);
+                    }
+
+                    log.debug("✅ API response received (last of all), response length: {}", apiResponse.length());
                     return apiResponse;
 
                 } finally {
                     ctx.close();
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new TefasClientException("Tefas/fetchFuncPerdormance interrupted", e);
-            } catch (com.microsoft.playwright.TimeoutError e) {
-                throw new TefasTimeoutException("fetchFundsPerformance", config.getElementWaitTimeoutMs());
+            } catch (TefasWafBlockedException e) {
+                throw e;
             } catch (TefasClientException e) {
                 throw e;
             }
         } catch (Exception e) {
-            log.error("Unexpected error in fetchHistoryJson for fundCode={}, start={}, end={}", fundCode, start, end,
-                    e);
-            throw new TefasClientException("TEFAS/fetchHistoryJson çağrısı başarısız: " + e.getMessage(), e);
+            log.error("Unexpected error in fetchFundPerformance for fundCode={}, start={}, end={}",
+                    fundCode, start, end, e);
+            throw new TefasClientException("TEFAS/fetchFundPerformance çağrısı başarısız: " + e.getMessage(), e);
         }
     }
-
     // PlaywrightHelper.java'ya ekle
 
     /**

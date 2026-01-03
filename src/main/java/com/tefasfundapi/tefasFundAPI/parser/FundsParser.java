@@ -120,7 +120,7 @@ public class FundsParser {
                 text(n, "semsiyeFonTuru", "SEMSIYEFONTURU", "SemsiyeFonTuru", "UmbrellaType", "umbrellaType"));
 
         // Getiri: String olarak geliyor (örn: "1,6770"), parse etmek gerekiyor
-        String getiriStr = text(n, "getiri", "GETIRI", "Getiri", "getiri");
+        String getiriStr = text(n, "getiri", "GETIRI", "Getiri", "getiri", "GETIRIORANI");
         if (getiriStr != null && !getiriStr.isEmpty()) {
             try {
                 // Türkçe format: "1,6770" -> 1.6770
