@@ -115,20 +115,27 @@ public class FundsParser {
 
         // Table extraction'dan gelen field'lar (camelCase)
         dto.setFundCode(text(n, "fonKodu", "FONKODU", "FundCode", "fundCode"));
-        dto.setFundName(text(n, "fonAdi", "FONADI", "FonAdi", "FundName", "fundName"));
+        dto.setFundName(text(n, "fonAdi", "FONADI", "FONUNVAN", "FonAdi", "FundName", "fundName"));
         dto.setUmbrellaType(
-                text(n, "semsiyeFonTuru", "SEMSIYEFONTURU", "SemsiyeFonTuru", "UmbrellaType", "umbrellaType"));
+                text(n, "semsiyeFonTuru", "SEMSIYEFONTURU", "FONTURACIKLAMA", "SemsiyeFonTuru", "UmbrellaType",
+                        "umbrellaType"));
 
-        // Getiri: String olarak geliyor (örn: "1,6770"), parse etmek gerekiyor
-        String getiriStr = text(n, "getiri", "GETIRI", "Getiri", "getiri", "GETIRIORANI");
-        if (getiriStr != null && !getiriStr.isEmpty()) {
-            try {
-                // Türkçe format: "1,6770" -> 1.6770
-                String normalized = getiriStr.replace(",", ".");
-                dto.setGetiri(Double.parseDouble(normalized));
-            } catch (NumberFormatException e) {
-                // Parse edilemezse null bırak
-                dto.setGetiri(null);
+        // Getiri: Önce number olarak dene (GETIRIORANI), sonra string olarak dene
+        Double getiriNumber = number(n, "GETIRIORANI", "getiri", "GETIRI", "Getiri");
+        if (getiriNumber != null) {
+            dto.setGetiri(getiriNumber);
+        } else {
+            // Fallback: String olarak geliyorsa (örn: "1,6770"), parse et
+            String getiriStr = text(n, "getiri", "GETIRI", "Getiri", "GETIRIORANI");
+            if (getiriStr != null && !getiriStr.isEmpty()) {
+                try {
+                    // Türkçe format: "1,6770" -> 1.6770
+                    String normalized = getiriStr.replace(",", ".");
+                    dto.setGetiri(Double.parseDouble(normalized));
+                } catch (NumberFormatException e) {
+                    // Parse edilemezse null bırak
+                    dto.setGetiri(null);
+                }
             }
         }
 

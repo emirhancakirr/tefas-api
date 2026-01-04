@@ -7,7 +7,6 @@ import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasNavigationException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasTimeoutException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
-import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +18,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingDeque;
 
 /**
  * Playwright ile TEFAS API çağrıları için ortak utility metodları.
@@ -175,13 +173,17 @@ public final class PlaywrightHelper {
 
             if (matchesEndpoint && status == 200) {
                 try {
+                    log.info("📡 Matched response, reading body... URL={}", url);
                     String body = response.text();
+                    log.info("📡 Body read successfully, length={}", body != null ? body.length() : 0);
+
                     ResponseWithBody responseWithBody = new ResponseWithBody(response, body);
-                    responseQueue.offer(responseWithBody);
-                    log.info("Response received: URL={}, Status={}, Body length={}",
-                            url, status, body != null ? body.length() : 0);
+                    boolean offered = responseQueue.offer(responseWithBody);
+
+                    log.info("📥 Response queued: offered={}, URL={}, Status={}, Body length={}, Queue size={}",
+                            offered, url, status, body != null ? body.length() : 0, responseQueue.size());
                 } catch (Exception e) {
-                    log.error("Failed to read response body: {}", e.getMessage(), e);
+                    log.error("❌ Failed to read/queue response body from URL={}: {}", url, e.getMessage(), e);
                 }
             }
         });
@@ -205,38 +207,39 @@ public final class PlaywrightHelper {
      * @throws TefasClientException  if waiting fails
      */
     public static String waitForLastApiResponse(
+            Page page,
             java.util.concurrent.BlockingQueue<ResponseWithBody> responseQueue,
             String endpoint,
             PlaywrightConfig config,
             long waitAfterLastMs) {
+        return waitForLastApiResponse(page, responseQueue, endpoint, config, waitAfterLastMs, 2);
+    }
+
+    public static String waitForLastApiResponse(
+            Page page,
+            java.util.concurrent.BlockingQueue<ResponseWithBody> responseQueue,
+            String endpoint,
+            PlaywrightConfig config,
+            long waitAfterLastMs,
+            int minResponseCount) { // Yeni parametre
         try {
             long startTime = System.currentTimeMillis();
-            long timeoutMs = Math.max(config.getElementWaitTimeoutMs(), 30000);
+            long timeoutMs = Math.max(config.getElementWaitTimeoutMs(), 2000);
 
             List<ResponseWithBody> allResponses = new ArrayList<>();
             ResponseWithBody lastResponse = null;
             long lastResponseTime = 0;
 
-            log.info("⏳ Collecting all responses from endpoint (max {} seconds)...", timeoutMs / 1000);
+            log.info("⏳ Collecting responses from endpoint (min: {}, max wait: {}s)...",
+                    minResponseCount, timeoutMs / 1000);
 
             while (System.currentTimeMillis() - startTime < timeoutMs) {
-                long remainingTime = timeoutMs - (System.currentTimeMillis() - startTime);
+                // Playwright event loop'unu çalıştırmak için kısa bekleme
+                // Bu adım kritik: poll() metodunu doğrudan çağırmak yerine waitForTimeout
+                // kullanıyoruz
+                page.waitForTimeout(100);
 
-                if (remainingTime < 500) {
-                    break;
-                }
-
-                // Eğer son response'tan sonra waitAfterLastMs geçtiyse, bitir
-                if (lastResponse != null &&
-                        (System.currentTimeMillis() - lastResponseTime) >= waitAfterLastMs) {
-                    log.info("✅ No more responses after {}ms, using last response", waitAfterLastMs);
-                    break;
-                }
-
-                // Poll with short timeout to check frequently
-                ResponseWithBody responseWithBody = responseQueue.poll(
-                        500,
-                        java.util.concurrent.TimeUnit.MILLISECONDS);
+                ResponseWithBody responseWithBody = responseQueue.poll();
 
                 if (responseWithBody != null) {
                     String body = responseWithBody.getBody();
@@ -250,17 +253,44 @@ public final class PlaywrightHelper {
                                 allResponses.size(), body.length());
                     }
                 }
+
+                // Minimum response sayısına ulaştıysak ve waitAfterLastMs geçtiyse bitir
+                if (allResponses.size() >= minResponseCount &&
+                        lastResponse != null &&
+                        (System.currentTimeMillis() - lastResponseTime) >= waitAfterLastMs) {
+                    log.info("✅ Received {} responses (min: {}), no more after {}ms, using last response",
+                            allResponses.size(), minResponseCount, waitAfterLastMs);
+                    break;
+                }
             }
 
+            log.info("🔍 Main loop ended, checking for any remaining responses in queue...");
+            log.info("📊 Current queue size: {}, allResponses collected: {}", responseQueue.size(),
+                    allResponses.size());
+
             // Final check - drain any remaining responses
-            ResponseWithBody finalCheck;
-            while ((finalCheck = responseQueue.poll()) != null) {
-                String body = finalCheck.getBody();
-                if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
-                    allResponses.add(finalCheck);
-                    lastResponse = finalCheck;
-                    log.info("📥 Response #{} received (final check): {} bytes",
-                            allResponses.size(), body.length());
+            int nullCount = 0;
+            int maxNullsBeforeBreak = 3;
+
+            for (int i = 0; i < 10; i++) {
+                page.waitForTimeout(500); // Pump event loop
+                ResponseWithBody finalCheck = responseQueue.poll();
+
+                if (finalCheck != null) {
+                    nullCount = 0;
+                    String body = finalCheck.getBody();
+                    if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
+                        allResponses.add(finalCheck);
+                        lastResponse = finalCheck;
+                        log.info("📥 Response #{} received (final check #{}): {} bytes",
+                                allResponses.size(), i + 1, body.length());
+                        continue;
+                    }
+                } else {
+                    nullCount++;
+                    if (nullCount >= maxNullsBeforeBreak) {
+                        break;
+                    }
                 }
             }
 
@@ -271,15 +301,15 @@ public final class PlaywrightHelper {
                         new Exception("No responses received from endpoint: " + endpoint));
             }
 
+            if (allResponses.size() < minResponseCount) {
+                log.warn("⚠️ Only received {} responses, expected at least {}",
+                        allResponses.size(), minResponseCount);
+            }
+
             log.info("✅ Collected {} responses total, returning the LAST one", allResponses.size());
-            // Get the last response from the list (guaranteed to exist since list is not
-            // empty)
             ResponseWithBody finalResponse = allResponses.get(allResponses.size() - 1);
             return finalResponse.getBody();
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new TefasClientException("Interrupted while waiting for API response", e);
         } catch (TefasTimeoutException e) {
             throw e;
         } catch (Exception e) {
@@ -293,6 +323,7 @@ public final class PlaywrightHelper {
      * Waits for a non-empty response from the queue.
      * Must be called AFTER setupResponseListener and AFTER triggering the action.
      * 
+     * @param page          Playwright Page objesi
      * @param responseQueue Queue that collects responses (from
      *                      setupResponseListener)
      * @param endpoint      API endpoint URL pattern (for logging)
@@ -301,10 +332,8 @@ public final class PlaywrightHelper {
      * @throws TefasTimeoutException if no non-empty response arrives within timeout
      * @throws TefasClientException  if waiting fails
      */
-    // To-do:Fix race condition in waitForApiResponse: responses are being added to
-    // the queue but the method times out before reading them, likely due to timing
-    // issues between button click and response polling.
     public static String waitForApiResponse(
+            Page page,
             java.util.concurrent.BlockingQueue<ResponseWithBody> responseQueue,
             String endpoint,
             PlaywrightConfig config) {
@@ -312,24 +341,10 @@ public final class PlaywrightHelper {
             long startTime = System.currentTimeMillis();
             long timeoutMs = Math.max(config.getElementWaitTimeoutMs(), 30000);
 
-            // İlk birkaç saniye daha uzun bekle (API çağrısı başlaması için)
-            boolean firstPoll = true;
-
             while (System.currentTimeMillis() - startTime < timeoutMs) {
-                long remainingTime = timeoutMs - (System.currentTimeMillis() - startTime);
+                page.waitForTimeout(200); // Yield to event loop
 
-                if (remainingTime < 500) {
-                    break;
-                }
-
-                // İlk poll'da daha uzun bekle (5 saniye), sonraki poll'larda 2 saniye
-                long pollTimeout = firstPoll ? Math.min(remainingTime, 5000) : Math.min(remainingTime, 2000);
-
-                ResponseWithBody responseWithBody = responseQueue.poll(
-                        pollTimeout,
-                        java.util.concurrent.TimeUnit.MILLISECONDS);
-
-                firstPoll = false;
+                ResponseWithBody responseWithBody = responseQueue.poll();
 
                 if (responseWithBody == null) {
                     continue;
@@ -341,11 +356,10 @@ public final class PlaywrightHelper {
                     log.info("API response received: {} bytes", body.length());
                     return body;
                 }
-
-                continue;
             }
 
             // Son kontrol
+            page.waitForTimeout(500);
             ResponseWithBody finalResponse = responseQueue.poll();
             if (finalResponse != null) {
                 String body = finalResponse.getBody();
@@ -356,9 +370,6 @@ public final class PlaywrightHelper {
             }
 
             throw new TefasTimeoutException("waitForApiResponse timeout {}", timeoutMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new TefasClientException("Interrupted while waiting for API response", e);
         } catch (Exception e) {
             throw new TefasClientException("Failed to wait for API response: " + e.getMessage(), e);
         }

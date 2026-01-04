@@ -129,25 +129,37 @@ public class FundsClient {
                 try {
                     Page page = ctx.newPage();
 
-                    // Setup response listener BEFORE any navigation
-                    java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
-                            .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
-
                     PlaywrightHelper.setupRequestLogger(page, config.getComparisonApiEndpoint());
                     PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
                     PlaywrightHelper.fillDateFields(page, start, end, config);
 
-                    // Button'a tıkla
-                    PlaywrightHelper.clickSearchButton(page, config);
+                    // Setup response listener AFTER fillDateFields to avoid capturing initial page
+                    // load response
+                    // This way we only capture the response from clicking the search button
+                    log.info(
+                            "🎯 Setting up response listener AFTER fillDateFields to capture only button click response...");
+                    java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
+                            .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
+                    log.info("✅ Response listener ready, queue size: {}", responseQueue.size());
 
-                    // Tüm response'ları topla ve en sonuncuyu al
-                    // 2000ms = Son response'tan sonra 2 saniye daha bekle, başka response yoksa
-                    // bitir
+                    // Button'a tıkla
+                    log.info("🔘 Clicking search button...");
+                    PlaywrightHelper.clickSearchButton(page, config);
+                    log.info("✅ Button clicked, queue size: {}", responseQueue.size());
+
+                    // Kısa bekleme
+                    Thread.sleep(2000);
+                    log.info("📊 After 2s wait, queue size: {}", responseQueue.size());
+
+                    // İkinci POST ~30 saniye sürüyor, timeout'u artır
+                    log.info("⏳ Starting waitForLastApiResponse...");
                     String apiResponse = PlaywrightHelper.waitForLastApiResponse(
+                            page,
                             responseQueue,
                             config.getComparisonApiEndpoint(),
                             config,
-                            2000);
+                            5000, // Son response'tan 5sn sonra bitir
+                            1); // En az 1 response (2 değil, sadece tarih filtreli istiyoruz)
 
                     // HTML dönerse (WAF engeli) hata fırlat
                     if (apiResponse.trim().startsWith("<")) {
