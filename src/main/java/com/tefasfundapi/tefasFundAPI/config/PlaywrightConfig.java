@@ -28,7 +28,7 @@ public class PlaywrightConfig {
     private int retryWaitMs = 200;
 
     // Browser ayarları
-    private boolean headless = true;
+    private boolean headless = false;
     private String userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     private int viewportWidth = 1920;
     private int viewportHeight = 1080;
@@ -40,7 +40,7 @@ public class PlaywrightConfig {
     private String historyPageUrl = "/TarihselVeriler.aspx";
     private String comparisonPageUrl = "/FonKarsilastirma.aspx";
     private String historyApiEndpoint = "/api/DB/BindHistoryInfo";
-    private String comparisonApiEndpoint = "/api/DB/BindComparisonFundReturns";
+    private String  comparisonApiEndpoint = "/api/DB/BindComparisonFundReturns";
 
     // Selectors
     private Selectors selectors = new Selectors();
@@ -261,8 +261,8 @@ public class PlaywrightConfig {
     public static class Selectors {
         private String startDate = "#TextBoxStartDate, input[name*='TextBoxStartDate']";
         private String endDate = "#TextBoxEndDate, input[name*='TextBoxEndDate']";
-        private String fundCodeFilter = "input[type='search'][aria-controls='table_general_info']";
-        private String searchButton = "#ButtonSearchDates, input[name*='ButtonSearchDates'], input[value='Görüntüle']";
+        private String fundCodeFilter = "input[type='search'][aria-controls='table_general_info'], input[type='search'][aria-controls='table_fund_returns']";
+        private String searchButton = "#ButtonSearchDates, input[name*='ButtonSearchDates'], input[value='Karşılaştır'], input[value='Görüntüle']";
 
         public String getStartDate() {
             return startDate;

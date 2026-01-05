@@ -1,7 +1,6 @@
 package com.tefasfundapi.tefasFundAPI.client;
 
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.RequestOptions;
 import com.tefasfundapi.tefasFundAPI.config.PlaywrightConfig;
 import com.tefasfundapi.tefasFundAPI.dto.FundReturnQuery;
 import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
@@ -11,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -28,14 +28,6 @@ public class FundsClient {
         this.config = config;
     }
 
-    private Map<String, String> getDefaultHeaders() {
-        return Map.of(
-                "Origin", config.getBaseUrl(),
-                "X-Requested-With", "XMLHttpRequest",
-                "Accept", "application/json, text/javascript, */*; q=0.01",
-                "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-    }
-
     /*
      * =======================================================================
      * 1) Karşılaştırma (BindComparisonFundReturns)
@@ -51,7 +43,6 @@ public class FundsClient {
                 try {
                     Page page = ctx.newPage();
 
-                    // Response'u dinlemek için promise oluştur
                     java.util.concurrent.CompletableFuture<Response> responseFuture = new java.util.concurrent.CompletableFuture<>();
 
                     page.onResponse(response -> {
@@ -63,26 +54,19 @@ public class FundsClient {
                         }
                     });
 
-                    // Sayfaya git
                     PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
 
-                    // Sayfa yüklendikten sonra biraz bekle
                     Thread.sleep(config.getPageLoadWaitMs());
-
-                    // Form parametrelerini sayfaya gönder (JavaScript ile)
-                    // veya sayfada filtreleme yap
 
                     Response response = responseFuture.get(30, java.util.concurrent.TimeUnit.SECONDS);
 
                     String json = response.text();
 
-                    // HTML dönerse (WAF engeli) hata fırlat
                     if (json.trim().startsWith("<")) {
                         String preview = json.length() > 500 ? json.substring(0, 500) : json;
                         throw new TefasWafBlockedException(preview);
                     }
 
-                    // Status kontrolü
                     if (response.status() == 401 || response.status() == 403) {
                         throw new TefasClientException("Unauthorized/Forbidden: " + response.status());
                     }
@@ -102,14 +86,12 @@ public class FundsClient {
         } catch (java.util.concurrent.TimeoutException e) {
             throw new TefasTimeoutException("fetchComparisonFundReturns", 30000, e);
         } catch (TefasWafBlockedException e) {
-            // Re-throw WAF exceptions as-is
             throw e;
         } catch (TefasClientException e) {
-            // Re-throw client exceptions as-is
             throw e;
         } catch (Exception e) {
             log.error("Unexpected error in fetchComparisonFundReturns", e);
-            throw new TefasClientException("TEFAS/BindComparisonFundReturns çağrısı başarısız: " + e.getMessage(), e);
+            throw new TefasClientException("TEFAS/BindComparisonFundReturns failed: " + e.getMessage(), e);
         }
     }
 
@@ -125,48 +107,125 @@ public class FundsClient {
      * gerçekte ne gönderiliyorsa birebir buraya yaz.
      * 
      */
-    public String fetchFundsJson(String query, List<String> codes) {
+    public String fetchFundPerformance(LocalDate start, LocalDate end) {
         try (Playwright pw = Playwright.create()) {
-            try (Browser browser = pw.chromium().launch(PlaywrightHelper.createLaunchOptions(config))) {
+            log.debug("fetchFundPerformance started for fundCode={}, start={}, end={}", start, end);
+
+            BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
+                    .setHeadless(config.isHeadless());
+
+            try (Browser browser = pw.chromium().launch(launchOptions)) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
                 try {
                     Page page = ctx.newPage();
-                    PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
 
-                    // Sayfa yüklendikten sonra biraz bekle (WAF için)
-                    Thread.sleep(config.getPageLoadWaitMs());
+                    PlaywrightHelper.setupRequestLogger(page, config.getComparisonApiEndpoint());
+                    PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
+                    PlaywrightHelper.fillDateFields(page, start, end, config);
 
-                    APIRequestContext api = createApiContext(pw, ctx, config.getComparisonReferer());
-                    try {
-                        String body = buildFundsFormBody(query, codes);
-                        APIResponse res = api.post(config.getComparisonApiEndpoint(),
-                                RequestOptions.create().setData(body));
-                        String text = res.text();
+                    log.info("Setting up response listener to capture button click response...");
+                    java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
+                            .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
+                    log.info("Response listener ready, queue size: {}", responseQueue.size());
 
-                        // HTML dönerse (WAF engeli) hata fırlat
-                        PlaywrightHelper.checkWafBlock(text);
+                    log.info("Clicking search button...");
+                    PlaywrightHelper.clickSearchButton(page, config);
+                    log.info("Button clicked, queue size: {}", responseQueue.size());
 
-                        PlaywrightHelper.ensureOk(res, text);
-                        return text;
-                    } finally {
-                        api.dispose();
+                    Thread.sleep(2000);
+                    log.info("After 2s wait, queue size: {}", responseQueue.size());
+
+                    log.info("Starting waitForLastApiResponse...");
+                    String apiResponse = PlaywrightHelper.waitForLastApiResponse(
+                            page,
+                            responseQueue,
+                            config.getComparisonApiEndpoint(),
+                            config,
+                            5000,
+                            1);
+
+                    if (apiResponse.trim().startsWith("<")) {
+                        String preview = apiResponse.length() > 500 ? apiResponse.substring(0, 500) : apiResponse;
+                        throw new TefasWafBlockedException(preview);
                     }
+
+                    log.debug("API response received, response length: {}", apiResponse.length());
+                    return apiResponse;
+
                 } finally {
                     ctx.close();
                 }
+            } catch (TefasWafBlockedException e) {
+                throw e;
+            } catch (TefasClientException e) {
+                throw e;
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new TefasClientException("TEFAS/FundsSearch interrupted", e);
-        } catch (TefasWafBlockedException e) {
-            // Re-throw WAF exceptions as-is
-            throw e;
-        } catch (TefasClientException e) {
-            // Re-throw client exceptions as-is
-            throw e;
         } catch (Exception e) {
-            log.error("Unexpected error in fetchFundsJson", e);
-            throw new TefasClientException("TEFAS/FundsSearch çağrısı başarısız: " + e.getMessage(), e);
+            log.error("Unexpected error in fetchFundPerformance for fundCode={}, start={}, end={}", start, end, e);
+            throw new TefasClientException("TEFAS/fetchFundPerformance failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Extracts fund performance data from table_fund_returns.
+     * 
+     * @param page     Playwright Page objesi
+     * @param fundCode Fon kodu (filtering için, null ise tüm fonlar)
+     * @param config   Playwright konfigürasyonu
+     * @return JSON string with fund performance data
+     */
+    public static String extractFundReturnsTableData(Page page, String fundCode, PlaywrightConfig config) {
+        try {
+            // Wait for table rows
+            page.waitForSelector("#table_fund_returns tbody tr:not(.dataTables_empty)",
+                    new Page.WaitForSelectorOptions().setTimeout(config.getElementWaitTimeoutMs()));
+
+            // Wait for DataTables to fully render
+            Thread.sleep(config.getTableDataExtractionWaitMs());
+
+            // Extract raw data
+            String rawJson = (String) page.evaluate("""
+                    (function() {
+                        const table = document.querySelector('#table_fund_returns');
+                        if (!table) {
+                            return JSON.stringify({ data: [] });
+                        }
+
+                        const rows = table.querySelectorAll('tbody tr');
+                        const data = [];
+
+                        rows.forEach(row => {
+                            if (row.classList.contains('dataTables_empty')) {
+                                return;
+                            }
+
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length >= 4) {
+                                data.push({
+                                    fonKodu: cells[0].textContent.trim(),
+                                    fonAdi: cells[1].textContent.trim(),
+                                    semsiyeFonTuru: cells[2].textContent.trim(),
+                                    getiri: cells[3].textContent.trim()
+                                });
+                            }
+                        });
+
+                        return JSON.stringify({ data: data });
+                    })();
+                    """);
+
+            log.debug("Raw extracted JSON length: {}", rawJson.length());
+
+            // Filter by fund code if provided (in Java, not JavaScript)
+            if (fundCode != null && !fundCode.isBlank()) {
+                // Parse and filter JSON here if needed
+                // Or filter in JavaScript above
+            }
+
+            return rawJson;
+
+        } catch (Exception e) {
+            throw new TefasClientException("Failed to extract fund returns table data: " + e.getMessage(), e);
         }
     }
 
@@ -175,26 +234,6 @@ public class FundsClient {
      * Ortak yardımcılar
      * =======================================================================
      */
-
-    private APIRequestContext createApiContext(Playwright pw, BrowserContext ctx, String referer) {
-        Map<String, String> headers = new HashMap<>(getDefaultHeaders());
-        headers.put("Referer", referer);
-        headers.put("User-Agent",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-        headers.put("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7");
-        headers.put("Accept-Encoding", "gzip, deflate, br");
-        headers.put("Connection", "keep-alive");
-        headers.put("Sec-Fetch-Dest", "empty");
-        headers.put("Sec-Fetch-Mode", "cors");
-        headers.put("Sec-Fetch-Site", "same-origin");
-
-        return pw.request().newContext(
-                new APIRequest.NewContextOptions()
-                        .setBaseURL(config.getBaseUrl())
-                        .setStorageState(ctx.storageState()) // çerez/localStorage kopyala
-                        .setExtraHTTPHeaders(headers)
-                        .setTimeout((double) config.getNavigationTimeoutMs()));
-    }
 
     /**
      * Sayfaya gidip /api/DB/BindComparisonFundReturns endpoint'ini dinler ve JSON
@@ -208,7 +247,6 @@ public class FundsClient {
                 try {
                     Page page = ctx.newPage();
 
-                    // Response'u dinlemek için promise oluştur
                     java.util.concurrent.CompletableFuture<Response> responseFuture = new java.util.concurrent.CompletableFuture<>();
 
                     page.onResponse(response -> {
@@ -218,24 +256,19 @@ public class FundsClient {
                         }
                     });
 
-                    // Sayfaya git
                     PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
 
-                    // Sayfa yüklendikten sonra biraz bekle
                     Thread.sleep(config.getPageLoadWaitMs());
 
-                    // Response'u bekle (maksimum 30 saniye)
                     Response response = responseFuture.get(30, java.util.concurrent.TimeUnit.SECONDS);
 
                     String json = response.text();
 
-                    // HTML dönerse (WAF engeli) hata fırlat
                     if (json.trim().startsWith("<")) {
                         String preview = json.length() > 500 ? json.substring(0, 500) : json;
                         throw new TefasWafBlockedException(preview);
                     }
 
-                    // Status kontrolü
                     if (response.status() == 401 || response.status() == 403) {
                         throw new TefasClientException("Unauthorized/Forbidden: " + response.status());
                     }
@@ -255,14 +288,12 @@ public class FundsClient {
         } catch (java.util.concurrent.TimeoutException e) {
             throw new TefasTimeoutException("fetchFunds", 30000, e);
         } catch (TefasWafBlockedException e) {
-            // Re-throw WAF exceptions as-is
             throw e;
         } catch (TefasClientException e) {
-            // Re-throw client exceptions as-is
             throw e;
         } catch (Exception e) {
             log.error("Unexpected error in fetchFunds", e);
-            throw new TefasClientException("TEFAS/fetchFunds çağrısı başarısız: " + e.getMessage(), e);
+            throw new TefasClientException("TEFAS/fetchFunds failed: " + e.getMessage(), e);
         }
     }
 

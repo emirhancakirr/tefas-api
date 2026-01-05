@@ -3,8 +3,12 @@ package com.tefasfundapi.tefasFundAPI.parser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tefasfundapi.tefasFundAPI.dto.FundDto;
+import com.tefasfundapi.tefasFundAPI.dto.FundPerformanceDto;
 import com.tefasfundapi.tefasFundAPI.exception.TefasParseException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
+
+import io.swagger.v3.core.util.Json;
+
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -32,10 +36,6 @@ public class FundsParser {
                 throw new TefasWafBlockedException(preview);
             }
 
-            // İlk 500 karakteri logla (debug için)
-            String preview = rawJson.length() > 500 ? rawJson.substring(0, 500) + "..." : rawJson;
-            System.out.println("FundsParser: Received response (first 500 chars): " + preview);
-
             JsonNode root = MAPPER.readTree(rawJson);
             JsonNode arr = root.isArray() ? root
                     : (root.has("data") ? root.get("data") : root);
@@ -43,11 +43,11 @@ public class FundsParser {
 
             if (arr.isArray()) {
                 for (JsonNode n : arr) {
-                    out.add(mapOne(n));
+                    out.add(mapOneFund(n));
                 }
             } else if (arr.isObject()) {
                 // tek kayıt dönmüş olabilir
-                out.add(mapOne(arr));
+                out.add(mapOneFund(arr));
             }
             return out;
         } catch (TefasParseException | TefasWafBlockedException e) {
@@ -59,7 +59,86 @@ public class FundsParser {
         }
     }
 
-    private FundDto mapOne(JsonNode n) {
+    // FundsParser.java
+
+    public List<FundPerformanceDto> toPerformanceDtos(String rawJson) {
+        try {
+            if (rawJson == null || rawJson.trim().isEmpty()) {
+                throw new TefasParseException("Empty or null response from Tefas API");
+            }
+
+            // HTML response kontrolü (WAF engeli veya hata sayfası)
+            String trimmed = rawJson.trim();
+            if (trimmed.startsWith("<") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+                String preview = trimmed.length() > 500 ? trimmed.substring(0, 500) : trimmed;
+                throw new TefasWafBlockedException(preview);
+            }
+
+            JsonNode root = MAPPER.readTree(rawJson);
+            JsonNode arr = root.isArray() ? root
+                    : (root.has("data") ? root.get("data") : null);
+
+            if (arr == null) {
+                throw new TefasParseException("No 'data' array found in response");
+            }
+
+            List<FundPerformanceDto> out = new ArrayList<>();
+            if (arr.isArray()) {
+                for (JsonNode n : arr) {
+                    out.add(mapOnePerformance(n)); // ✅ mapOne yerine mapOnePerformance
+                }
+            } else if (arr.isObject()) {
+                out.add(mapOnePerformance(arr)); // ✅ mapOne yerine mapOnePerformance
+            }
+            return out;
+
+        } catch (TefasParseException | TefasWafBlockedException e) {
+            // Re-throw parse/WAF exceptions as-is
+            throw e;
+        } catch (Exception e) {
+            String preview = rawJson != null && rawJson.length() > 200 ? rawJson.substring(0, 200) : rawJson;
+            throw new TefasParseException("JSON parse failed. Response preview: " + preview, e);
+        }
+    }
+
+    /**
+     * Maps a single JSON node to FundPerformanceDto.
+     * Expected fields from table_fund_returns: fonKodu, fonAdi, semsiyeFonTuru,
+     * getiri
+     */
+    private FundPerformanceDto mapOnePerformance(JsonNode n) {
+        FundPerformanceDto dto = new FundPerformanceDto();
+
+        // Table extraction'dan gelen field'lar (camelCase)
+        dto.setFundCode(text(n, "fonKodu", "FONKODU", "FundCode", "fundCode"));
+        dto.setFundName(text(n, "fonAdi", "FONADI", "FONUNVAN", "FonAdi", "FundName", "fundName"));
+        dto.setUmbrellaType(
+                text(n, "semsiyeFonTuru", "SEMSIYEFONTURU", "FONTURACIKLAMA", "SemsiyeFonTuru", "UmbrellaType",
+                        "umbrellaType"));
+
+        // Getiri: Önce number olarak dene (GETIRIORANI), sonra string olarak dene
+        Double getiriNumber = number(n, "GETIRIORANI", "getiri", "GETIRI", "Getiri");
+        if (getiriNumber != null) {
+            dto.setGetiri(getiriNumber);
+        } else {
+            // Fallback: String olarak geliyorsa (örn: "1,6770"), parse et
+            String getiriStr = text(n, "getiri", "GETIRI", "Getiri", "GETIRIORANI");
+            if (getiriStr != null && !getiriStr.isEmpty()) {
+                try {
+                    // Türkçe format: "1,6770" -> 1.6770
+                    String normalized = getiriStr.replace(",", ".");
+                    dto.setGetiri(Double.parseDouble(normalized));
+                } catch (NumberFormatException e) {
+                    // Parse edilemezse null bırak
+                    dto.setGetiri(null);
+                }
+            }
+        }
+
+        return dto;
+    }
+
+    private FundDto mapOneFund(JsonNode n) {
         FundDto dto = new FundDto();
 
         // Türkçe alan adları ile eşleştirme
