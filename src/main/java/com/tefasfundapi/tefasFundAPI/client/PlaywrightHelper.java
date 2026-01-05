@@ -105,13 +105,7 @@ public final class PlaywrightHelper {
         }
     }
 
-    // PlaywrightHelper.java - clickSearchButton metodundan sonra ekle (satır
-    // 211'den sonra)
-
     // ==================== Response Waiting ====================
-
-    // PlaywrightHelper.java:124-180 - waitForApiResponse metodunu güncelle
-    // PlaywrightHelper.java - waitForApiResponse'dan önce ekle
 
     /**
      * Sets up the response listener for a specific endpoint.
@@ -168,22 +162,21 @@ public final class PlaywrightHelper {
             String url = response.url();
             int status = response.status();
 
-            // Sadece status 200 ve endpoint match eden response'ları al
             boolean matchesEndpoint = url.contains(endpoint) || url.contains("BindComparisonFundReturns");
 
             if (matchesEndpoint && status == 200) {
                 try {
-                    log.info("📡 Matched response, reading body... URL={}", url);
+                    log.info("Matched response, reading body... URL={}", url);
                     String body = response.text();
-                    log.info("📡 Body read successfully, length={}", body != null ? body.length() : 0);
+                    log.info("Body read successfully, length={}", body != null ? body.length() : 0);
 
                     ResponseWithBody responseWithBody = new ResponseWithBody(response, body);
                     boolean offered = responseQueue.offer(responseWithBody);
 
-                    log.info("📥 Response queued: offered={}, URL={}, Status={}, Body length={}, Queue size={}",
+                    log.info("Response queued: offered={}, URL={}, Status={}, Body length={}, Queue size={}",
                             offered, url, status, body != null ? body.length() : 0, responseQueue.size());
                 } catch (Exception e) {
-                    log.error("❌ Failed to read/queue response body from URL={}: {}", url, e.getMessage(), e);
+                    log.error("Failed to read/queue response body from URL={}: {}", url, e.getMessage(), e);
                 }
             }
         });
@@ -230,7 +223,7 @@ public final class PlaywrightHelper {
             ResponseWithBody lastResponse = null;
             long lastResponseTime = 0;
 
-            log.info("⏳ Collecting responses from endpoint (min: {}, max wait: {}s)...",
+            log.info("Collecting responses from endpoint (min: {}, max wait: {}s)...",
                     minResponseCount, timeoutMs / 1000);
 
             while (System.currentTimeMillis() - startTime < timeoutMs) {
@@ -249,7 +242,7 @@ public final class PlaywrightHelper {
                         lastResponse = responseWithBody;
                         lastResponseTime = System.currentTimeMillis();
 
-                        log.info("📥 Response #{} received: {} bytes",
+                        log.info("Response #{} received: {} bytes",
                                 allResponses.size(), body.length());
                     }
                 }
@@ -258,14 +251,14 @@ public final class PlaywrightHelper {
                 if (allResponses.size() >= minResponseCount &&
                         lastResponse != null &&
                         (System.currentTimeMillis() - lastResponseTime) >= waitAfterLastMs) {
-                    log.info("✅ Received {} responses (min: {}), no more after {}ms, using last response",
+                    log.info("Received {} responses (min: {}), no more after {}ms, using last response",
                             allResponses.size(), minResponseCount, waitAfterLastMs);
                     break;
                 }
             }
 
-            log.info("🔍 Main loop ended, checking for any remaining responses in queue...");
-            log.info("📊 Current queue size: {}, allResponses collected: {}", responseQueue.size(),
+            log.info("Main loop ended, checking for any remaining responses in queue...");
+            log.info("Current queue size: {}, allResponses collected: {}", responseQueue.size(),
                     allResponses.size());
 
             // Final check - drain any remaining responses
@@ -282,7 +275,7 @@ public final class PlaywrightHelper {
                     if (body != null && !body.trim().isEmpty() && !body.trim().equals("[]")) {
                         allResponses.add(finalCheck);
                         lastResponse = finalCheck;
-                        log.info("📥 Response #{} received (final check #{}): {} bytes",
+                        log.info("Response #{} received (final check #{}): {} bytes",
                                 allResponses.size(), i + 1, body.length());
                         continue;
                     }
@@ -302,11 +295,11 @@ public final class PlaywrightHelper {
             }
 
             if (allResponses.size() < minResponseCount) {
-                log.warn("⚠️ Only received {} responses, expected at least {}",
+                log.warn("Only received {} responses, expected at least {}",
                         allResponses.size(), minResponseCount);
             }
 
-            log.info("✅ Collected {} responses total, returning the LAST one", allResponses.size());
+            log.info("Collected {} responses total, returning the LAST one", allResponses.size());
             ResponseWithBody finalResponse = allResponses.get(allResponses.size() - 1);
             return finalResponse.getBody();
 
@@ -439,24 +432,24 @@ public final class PlaywrightHelper {
     public static void clickSearchButton(Page page, PlaywrightConfig config) {
         try {
             String searchButtonSelector = config.getSelectors().getSearchButton();
-            log.info("🔘 Attempting to click search button with selector: {}", searchButtonSelector);
+            log.info("Attempting to click search button with selector: {}", searchButtonSelector);
 
             page.waitForSelector(searchButtonSelector,
                     new Page.WaitForSelectorOptions()
                             .setTimeout(config.getElementWaitTimeoutMs()));
 
-            log.info("🔘 Button found, clicking...");
+            log.info("Button found, clicking...");
             page.click(searchButtonSelector,
                     new Page.ClickOptions().setTimeout(config.getButtonClickTimeoutMs()));
 
-            log.info("✅ Search button clicked successfully: {}", searchButtonSelector);
+            log.info("Search button clicked successfully: {}", searchButtonSelector);
 
         } catch (Exception e) {
-            log.warn("⚠️ Could not click button with selector '{}': {}", config.getSelectors().getSearchButton(),
+            log.warn("Could not click button with selector '{}': {}", config.getSelectors().getSearchButton(),
                     e.getMessage());
 
             try {
-                log.info("🔄 Trying JavaScript click fallback...");
+                log.info("Trying JavaScript click fallback...");
                 boolean clicked = page.evaluate("""
                         (function() {
                             var btn = document.getElementById('ButtonSearchDates') ||
@@ -472,9 +465,9 @@ public final class PlaywrightHelper {
                         """).toString().equals("true");
 
                 if (clicked) {
-                    log.info("✅ JavaScript click successful");
+                    log.info("JavaScript click successful");
                     Thread.sleep(config.getButtonClickWaitMs());
-                    log.info("✅ Waiting {} ms for API call to be triggered...", config.getButtonClickWaitMs());
+                    log.info("Waiting {} ms for API call to be triggered...", config.getButtonClickWaitMs());
                 } else {
                     throw new TefasClientException("Could not find or click search button");
                 }
@@ -509,8 +502,6 @@ public final class PlaywrightHelper {
     }
 
     // ==================== Table Loading ====================
-
-    // PlaywrightHelper.java - waitForTableToLoad'dan sonra ekle
 
     /**
      * Waits for the fund returns table (#table_fund_returns) to fully load.

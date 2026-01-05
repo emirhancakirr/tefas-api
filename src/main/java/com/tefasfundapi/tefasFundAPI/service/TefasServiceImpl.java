@@ -51,7 +51,7 @@ public class TefasServiceImpl implements TefasService {
 
     @Override
     public Optional<FundDto> getFund(String code, List<String> fields) {
-        log.debug("getFund called with code={} and fields={}", code, fields);
+        log.info("getFund called with code={} and fields={}", code, fields);
         if (code == null || code.isBlank())
             return Optional.empty();
 
@@ -67,17 +67,15 @@ public class TefasServiceImpl implements TefasService {
         String raw = fundsClient.fetchComparisonFundReturns(query);
         List<FundDto> list = fundsParser.toFunds(raw);
 
-        Optional<FundDto> match = list.stream()
-                .filter(f -> f.getFundCode() != null && f.getFundCode().equalsIgnoreCase(code.trim()))
-                .findFirst();
+        List<FundDto> filtered = filterByFundCode(list, code);
 
-        return match;
+        return filtered.stream().findFirst();
     }
 
     @Override
     public Optional<PagedResponse<PriceRowDto>> getFundNav(String code, LocalDate start, LocalDate end,
             Pageable pageable) {
-        log.debug("TefasServiceImpl: getFundNav called with code=" + code + " and start=" + start + " and end="
+        log.info("TefasServiceImpl: getFundNav called with code=" + code + " and start=" + start + " and end="
                 + end + " and pageable=" + pageable);
         if (code == null || code.isBlank())
             return Optional.empty();
@@ -112,17 +110,22 @@ public class TefasServiceImpl implements TefasService {
         if (code == null || code.isBlank())
             return Optional.empty();
 
-        String raw = fundsClient.fetchFundPerformance(code.trim(), start, end);
+        String raw = fundsClient.fetchFundPerformance(start, end);
         List<FundPerformanceDto> list = fundsParser.toPerformanceDtos(raw);
+        List<FundPerformanceDto> filteredList = filterByFundCode(list, code);
 
-        PaginationInfo pagination = calculatePaginationInfo(pageable, list);
+        if (filteredList.isEmpty()) {
+            return Optional.empty();
+        }
+
+        PaginationInfo pagination = calculatePaginationInfo(pageable, filteredList);
 
         List<FundPerformanceDto> pagedList;
 
         if (pagination.startIndex() >= pagination.totalElements) {
             pagedList = List.of();
         } else {
-            pagedList = list.subList(pagination.startIndex(), pagination.endIndex());
+            pagedList = filteredList.subList(pagination.startIndex(), pagination.endIndex());
         }
 
         PagedResponse.Meta meta = new PagedResponse.Meta(
@@ -146,4 +149,20 @@ public class TefasServiceImpl implements TefasService {
         return new PaginationInfo(startIndex, endIndex, totalElements, totalPages);
     }
 
+    private <T> List<T> filterByFundCode(List<T> list, String code) {
+        if (code == null || code.isBlank() || list == null || list.isEmpty()) {
+            return List.of();
+        }
+        String trimmedCode = code.trim();
+        return list.stream()
+                .filter(item -> {
+                    if (item instanceof FundDto dto) {
+                        return dto.getFundCode() != null && dto.getFundCode().equalsIgnoreCase(trimmedCode);
+                    } else if (item instanceof FundPerformanceDto dto) {
+                        return dto.getFundCode() != null && dto.getFundCode().equalsIgnoreCase(trimmedCode);
+                    }
+                    return false;
+                })
+                .toList();
+    }
 }

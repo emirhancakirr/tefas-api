@@ -36,10 +36,6 @@ public class FundsParser {
                 throw new TefasWafBlockedException(preview);
             }
 
-            // İlk 500 karakteri logla (debug için)
-            String preview = rawJson.length() > 500 ? rawJson.substring(0, 500) + "..." : rawJson;
-            System.out.println("FundsParser: Received response (first 500 chars): " + preview);
-
             JsonNode root = MAPPER.readTree(rawJson);
             JsonNode arr = root.isArray() ? root
                     : (root.has("data") ? root.get("data") : root);

@@ -43,7 +43,6 @@ public class FundsClient {
                 try {
                     Page page = ctx.newPage();
 
-                    // Response'u dinlemek için promise oluştur
                     java.util.concurrent.CompletableFuture<Response> responseFuture = new java.util.concurrent.CompletableFuture<>();
 
                     page.onResponse(response -> {
@@ -55,26 +54,19 @@ public class FundsClient {
                         }
                     });
 
-                    // Sayfaya git
                     PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
 
-                    // Sayfa yüklendikten sonra biraz bekle
                     Thread.sleep(config.getPageLoadWaitMs());
-
-                    // Form parametrelerini sayfaya gönder (JavaScript ile)
-                    // veya sayfada filtreleme yap
 
                     Response response = responseFuture.get(30, java.util.concurrent.TimeUnit.SECONDS);
 
                     String json = response.text();
 
-                    // HTML dönerse (WAF engeli) hata fırlat
                     if (json.trim().startsWith("<")) {
                         String preview = json.length() > 500 ? json.substring(0, 500) : json;
                         throw new TefasWafBlockedException(preview);
                     }
 
-                    // Status kontrolü
                     if (response.status() == 401 || response.status() == 403) {
                         throw new TefasClientException("Unauthorized/Forbidden: " + response.status());
                     }
@@ -94,14 +86,12 @@ public class FundsClient {
         } catch (java.util.concurrent.TimeoutException e) {
             throw new TefasTimeoutException("fetchComparisonFundReturns", 30000, e);
         } catch (TefasWafBlockedException e) {
-            // Re-throw WAF exceptions as-is
             throw e;
         } catch (TefasClientException e) {
-            // Re-throw client exceptions as-is
             throw e;
         } catch (Exception e) {
             log.error("Unexpected error in fetchComparisonFundReturns", e);
-            throw new TefasClientException("TEFAS/BindComparisonFundReturns çağrısı başarısız: " + e.getMessage(), e);
+            throw new TefasClientException("TEFAS/BindComparisonFundReturns failed: " + e.getMessage(), e);
         }
     }
 
@@ -117,12 +107,12 @@ public class FundsClient {
      * gerçekte ne gönderiliyorsa birebir buraya yaz.
      * 
      */
-    public String fetchFundPerformance(String fundCode, LocalDate start, LocalDate end) {
+    public String fetchFundPerformance(LocalDate start, LocalDate end) {
         try (Playwright pw = Playwright.create()) {
-            log.debug("fetchFundPerformance started for fundCode={}, start={}, end={}", fundCode, start, end);
+            log.debug("fetchFundPerformance started for fundCode={}, start={}, end={}", start, end);
 
             BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
-                    .setHeadless(false);
+                    .setHeadless(config.isHeadless());
 
             try (Browser browser = pw.chromium().launch(launchOptions)) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
@@ -133,41 +123,33 @@ public class FundsClient {
                     PlaywrightHelper.navigateAndWaitForWaf(page, config.getComparisonReferer(), config);
                     PlaywrightHelper.fillDateFields(page, start, end, config);
 
-                    // Setup response listener AFTER fillDateFields to avoid capturing initial page
-                    // load response
-                    // This way we only capture the response from clicking the search button
-                    log.info(
-                            "🎯 Setting up response listener AFTER fillDateFields to capture only button click response...");
+                    log.info("Setting up response listener to capture button click response...");
                     java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
                             .setupResponseListener(page, config.getComparisonApiEndpoint(), config);
-                    log.info("✅ Response listener ready, queue size: {}", responseQueue.size());
+                    log.info("Response listener ready, queue size: {}", responseQueue.size());
 
-                    // Button'a tıkla
-                    log.info("🔘 Clicking search button...");
+                    log.info("Clicking search button...");
                     PlaywrightHelper.clickSearchButton(page, config);
-                    log.info("✅ Button clicked, queue size: {}", responseQueue.size());
+                    log.info("Button clicked, queue size: {}", responseQueue.size());
 
-                    // Kısa bekleme
                     Thread.sleep(2000);
-                    log.info("📊 After 2s wait, queue size: {}", responseQueue.size());
+                    log.info("After 2s wait, queue size: {}", responseQueue.size());
 
-                    // İkinci POST ~30 saniye sürüyor, timeout'u artır
-                    log.info("⏳ Starting waitForLastApiResponse...");
+                    log.info("Starting waitForLastApiResponse...");
                     String apiResponse = PlaywrightHelper.waitForLastApiResponse(
                             page,
                             responseQueue,
                             config.getComparisonApiEndpoint(),
                             config,
-                            5000, // Son response'tan 5sn sonra bitir
-                            1); // En az 1 response (2 değil, sadece tarih filtreli istiyoruz)
+                            5000,
+                            1);
 
-                    // HTML dönerse (WAF engeli) hata fırlat
                     if (apiResponse.trim().startsWith("<")) {
                         String preview = apiResponse.length() > 500 ? apiResponse.substring(0, 500) : apiResponse;
                         throw new TefasWafBlockedException(preview);
                     }
 
-                    log.debug("✅ API response received (last of all), response length: {}", apiResponse.length());
+                    log.debug("API response received, response length: {}", apiResponse.length());
                     return apiResponse;
 
                 } finally {
@@ -179,12 +161,10 @@ public class FundsClient {
                 throw e;
             }
         } catch (Exception e) {
-            log.error("Unexpected error in fetchFundPerformance for fundCode={}, start={}, end={}",
-                    fundCode, start, end, e);
-            throw new TefasClientException("TEFAS/fetchFundPerformance çağrısı başarısız: " + e.getMessage(), e);
+            log.error("Unexpected error in fetchFundPerformance for fundCode={}, start={}, end={}", start, end, e);
+            throw new TefasClientException("TEFAS/fetchFundPerformance failed: " + e.getMessage(), e);
         }
     }
-    // PlaywrightHelper.java'ya ekle
 
     /**
      * Extracts fund performance data from table_fund_returns.
@@ -267,7 +247,6 @@ public class FundsClient {
                 try {
                     Page page = ctx.newPage();
 
-                    // Response'u dinlemek için promise oluştur
                     java.util.concurrent.CompletableFuture<Response> responseFuture = new java.util.concurrent.CompletableFuture<>();
 
                     page.onResponse(response -> {
@@ -277,24 +256,19 @@ public class FundsClient {
                         }
                     });
 
-                    // Sayfaya git
                     PlaywrightHelper.navigateForSession(page, config.getComparisonReferer(), config);
 
-                    // Sayfa yüklendikten sonra biraz bekle
                     Thread.sleep(config.getPageLoadWaitMs());
 
-                    // Response'u bekle (maksimum 30 saniye)
                     Response response = responseFuture.get(30, java.util.concurrent.TimeUnit.SECONDS);
 
                     String json = response.text();
 
-                    // HTML dönerse (WAF engeli) hata fırlat
                     if (json.trim().startsWith("<")) {
                         String preview = json.length() > 500 ? json.substring(0, 500) : json;
                         throw new TefasWafBlockedException(preview);
                     }
 
-                    // Status kontrolü
                     if (response.status() == 401 || response.status() == 403) {
                         throw new TefasClientException("Unauthorized/Forbidden: " + response.status());
                     }
@@ -314,14 +288,12 @@ public class FundsClient {
         } catch (java.util.concurrent.TimeoutException e) {
             throw new TefasTimeoutException("fetchFunds", 30000, e);
         } catch (TefasWafBlockedException e) {
-            // Re-throw WAF exceptions as-is
             throw e;
         } catch (TefasClientException e) {
-            // Re-throw client exceptions as-is
             throw e;
         } catch (Exception e) {
             log.error("Unexpected error in fetchFunds", e);
-            throw new TefasClientException("TEFAS/fetchFunds çağrısı başarısız: " + e.getMessage(), e);
+            throw new TefasClientException("TEFAS/fetchFunds failed: " + e.getMessage(), e);
         }
     }
 
