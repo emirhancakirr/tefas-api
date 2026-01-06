@@ -82,15 +82,21 @@ public class TefasServiceImpl implements TefasService {
 
         String raw = historyClient.fetchHistoryJson(code.trim(), start, end);
         List<PriceRowDto> list = historyParser.toPriceRows(raw);
+        List<PriceRowDto> filteredList = filterByFundCode(list, code);
 
-        PaginationInfo pagination = calculatePaginationInfo(pageable, list);
+        if (filteredList.isEmpty()) {
+            log.info("FundCode is not in filtered list");
+            return Optional.empty();
+        }
+
+        PaginationInfo pagination = calculatePaginationInfo(pageable, filteredList);
 
         List<PriceRowDto> pagedList;
 
         if (pagination.startIndex() >= pagination.totalElements) {
             pagedList = List.of();
         } else {
-            pagedList = list.subList(pagination.startIndex(), pagination.endIndex());
+            pagedList = filteredList.subList(pagination.startIndex(), pagination.endIndex());
         }
 
         PagedResponse.Meta meta = new PagedResponse.Meta(
@@ -159,6 +165,8 @@ public class TefasServiceImpl implements TefasService {
                     if (item instanceof FundDto dto) {
                         return dto.getFundCode() != null && dto.getFundCode().equalsIgnoreCase(trimmedCode);
                     } else if (item instanceof FundPerformanceDto dto) {
+                        return dto.getFundCode() != null && dto.getFundCode().equalsIgnoreCase(trimmedCode);
+                    } else if (item instanceof PriceRowDto dto) {
                         return dto.getFundCode() != null && dto.getFundCode().equalsIgnoreCase(trimmedCode);
                     }
                     return false;
