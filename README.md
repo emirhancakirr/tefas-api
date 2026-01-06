@@ -2,15 +2,17 @@
 
 Türkiye'deki yatırım fonları hakkında veri sağlayan RESTful API Proxy. TEFAS (Takasbank Elektronik Fon Alım Satım Platformu) web sitesinden Playwright kullanarak veri çeker ve düzenlenmiş, kullanıma hazır JSON formatında sunar.
 
-## 🚀 Özellikler
+## 🚀 Özellikler (güncel)
 
 - **Fon Bilgileri**: Fon koduna göre detaylı fon bilgileri (getiri oranları, fon türü, vb.)
-- **NAV Geçmişi**: Fonların tarihsel NAV (Net Aktif Değer) verileri
-- **RESTful API**: Standart HTTP metodları ile kolay entegrasyon
+- **NAV Geçmişi**: Fonların tarihsel NAV (Net Aktif Değer) verileri; fon kodu bazlı filtreleme ve sayfalama
+- **Fon Performansı**: Tarih aralığına göre fon getirileri (BindComparisonFundReturns) – buton-click sonrası response yakalama/queue mantığı güncellendi
 - **Field Filtering**: İhtiyacınız olan alanları seçerek response boyutunu optimize edin
+- **RESTful API**: Standart HTTP metodları ile kolay entegrasyon
 - **Swagger UI**: Interaktif API dokümantasyonu (`/docs`)
 - **Error Handling**: Standartlaştırılmış hata yanıtları
-- **Unit Tests**: Kapsamlı test kapsamı
+- **Playwright Tuning**: Headless modu ve timeout’lar konfigüre edilebilir
+- **Aktif Geliştirme**: Proje sürekli geliştirme altında, yeni özellikler ekleniyor
 
 ## 📋 Gereksinimler
 
@@ -122,6 +124,36 @@ curl "http://localhost:8080/v1/funds/AAK/nav?start=2024-01-01&end=2024-01-31"
 }
 ```
 
+### 3. Fon Performansı (BindComparisonFundReturns)
+
+Belirli bir fonun seçilen tarih aralığındaki performans getirilerini getirir.
+
+**Endpoint:** `GET /v1/funds/{code}/performance`
+
+**Parametreler:**
+- `code` (path, required): Fon kodu
+- `start` (query, required): Başlangıç tarihi (YYYY-MM-DD)
+- `end` (query, required): Bitiş tarihi (YYYY-MM-DD)
+
+**Örnek İstek:**
+```bash
+curl "http://localhost:8080/v1/funds/AAK/performance?start=2024-01-01&end=2024-03-01"
+```
+
+**Örnek Response:**
+```json
+{
+  "data": [
+    {
+      "fundCode": "AAK",
+      "fundName": "ATA PORTFÖY ÇOKLU VARLIK DEĞİŞKEN FON",
+      "umbrellaType": "Hisse Senedi Şemsiye Fonu",
+      "getiri": 1.6770
+    }
+  ]
+}
+```
+
 ## 📖 Swagger UI
 
 Interaktif API dokümantasyonu için Swagger UI'ı kullanabilirsiniz:
@@ -205,14 +237,19 @@ API standart hata formatı kullanır:
 
 ## 🚧 Geliştirme Durumu
 
-Bu proje aktif geliştirme aşamasındadır. Planlanan özellikler:
+Bu proje **aktif geliştirme** aşamasındadır. Son eklenenler:
+- Fon performansı endpoint’i (`/v1/funds/{code}/performance`)
+- Playwright response dinleyici ve kuyruğa alma iyileştirmeleri (button-click sonrası response kaçmıyor)
+- Fon kodu bazlı filtreleme (NAV ve performans sonuçlarında)
 
-- [ ] Redis caching
+Planlananlar:
+- [ ] Redis/HTTP caching
 - [ ] Rate limiting
-- [ ] Retry mekanizması
-- [ ] Docker support
-- [ ] Pagination (NAV endpoint için)
-- [ ] Authentication/Authorization
+- [ ] Retry + circuit breaker
+- [ ] Docker image ve publish
+- [ ] Ek Swagger örnekleri ve contract testleri
+- [ ] AuthZ/AuthN
+- [ ] Gözlemlenebilirlik (metrics/trace/log profilleri)
 
 Detaylı geliştirme planı için `TODO.md` dosyasına bakın.
 
