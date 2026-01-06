@@ -72,9 +72,7 @@ public class TefasApiCaller {
 
         TefasApiCaller caller = new TefasApiCaller();
         String json = caller.postHistoryInfo(exampleBody, Map.of(
-        // Örnek: anti-forgery header'ı gerekiyorsa (sniffer'da gördüğün isim/değeri
-        // kullan)
-        // "RequestVerificationToken", "xyz-123"
+
         ));
         log.info("Response: {}", json);
     }

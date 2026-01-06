@@ -1,16 +1,16 @@
 package com.tefasfundapi.tefasFundAPI.client;
 
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.LoadState;
 import com.tefasfundapi.tefasFundAPI.config.PlaywrightConfig;
 import com.tefasfundapi.tefasFundAPI.exception.TefasClientException;
 import com.tefasfundapi.tefasFundAPI.exception.TefasTimeoutException;
+import com.tefasfundapi.tefasFundAPI.exception.TefasWafBlockedException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 
 /**
  * TEFAS tarihsel veri (NAV) istemcisi.
@@ -40,7 +40,7 @@ public class HistoryClient {
             log.debug("fetchHistoryJson started for fundCode={}, start={}, end={}", fundCode, start, end);
             // Launch browser with configuration
             BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
-                    .setHeadless(config.isHeadless());
+                    .setHeadless(false);
             try (Browser browser = pw.chromium().launch(launchOptions)) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
                 try {
@@ -48,24 +48,33 @@ public class HistoryClient {
 
                     // Request logging for debugging (optional, can remove if not needed)
                     PlaywrightHelper.setupRequestLogger(page, config.getHistoryApiEndpoint());
-
                     PlaywrightHelper.navigateAndWaitForWaf(page, config.getHistoryReferer(), config);
-
-                    // Step 1: Fill date fields
                     PlaywrightHelper.fillDateFields(page, start, end, config);
 
-                    // Step 2: Fill fund code filter (before clicking button)
-                    PlaywrightHelper.fillFundCodeFilter(page, fundCode, config,null);
+                    log.info("Setting up response listener to capture button click response...");
+                    java.util.concurrent.BlockingQueue<PlaywrightHelper.ResponseWithBody> responseQueue = PlaywrightHelper
+                            .setupResponseListener(page, config.getHistoryApiEndpoint(), config);
+                    log.info("Response listener ready, queue size: {}", responseQueue.size());
 
-                    // Step 3: Click "Görüntüle" button to load table
+                    log.info("Clicking search button...");
                     PlaywrightHelper.clickSearchButton(page, config);
+                    Thread.sleep(2000);
 
-                    // Step 4: Wait for table to load
-                    PlaywrightHelper.waitForTableToLoad(page, config);
+                    String apiResponse = PlaywrightHelper.waitForLastApiResponse(
+                            page,
+                            responseQueue,
+                            config.getHistoryApiEndpoint(),
+                            config,
+                            5000,
+                            1);
 
-                    // Step 5: Extract filtered data from table and transform to API format
-                    String tableJson = extractTableDataAsJson(page, fundCode);
-                    return tableJson;
+                    if (apiResponse.trim().startsWith("<")) {
+                        String preview = apiResponse.length() > 500 ? apiResponse.substring(0, 500) : apiResponse;
+                        throw new TefasWafBlockedException(preview);
+                    }
+
+                    log.debug("API response received, response length: {}", apiResponse.length());
+                    return apiResponse;
                 } finally {
                     ctx.close();
                 }

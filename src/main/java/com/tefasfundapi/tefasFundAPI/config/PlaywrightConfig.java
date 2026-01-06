@@ -40,7 +40,7 @@ public class PlaywrightConfig {
     private String historyPageUrl = "/TarihselVeriler.aspx";
     private String comparisonPageUrl = "/FonKarsilastirma.aspx";
     private String historyApiEndpoint = "/api/DB/BindHistoryInfo";
-    private String  comparisonApiEndpoint = "/api/DB/BindComparisonFundReturns";
+    private String comparisonApiEndpoint = "/api/DB/BindComparisonFundReturns";
 
     // Selectors
     private Selectors selectors = new Selectors();
