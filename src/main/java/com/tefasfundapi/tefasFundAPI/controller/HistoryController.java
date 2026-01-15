@@ -3,6 +3,13 @@ package com.tefasfundapi.tefasFundAPI.controller;
 import com.tefasfundapi.tefasFundAPI.exception.FundNotFoundException;
 import com.tefasfundapi.tefasFundAPI.exception.InvalidDateRangeException;
 import com.tefasfundapi.tefasFundAPI.service.TefasService;
+import com.tefasfundapi.tefasFundAPI.dto.PagedResponse;
+import com.tefasfundapi.tefasFundAPI.dto.PriceRowDto;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springdoc.core.annotations.ParameterObject;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -19,6 +26,7 @@ import java.time.LocalDate;
 @RestController
 @RequestMapping("/v1/funds")
 @Validated
+@Tag(name = "Fund History", description = "Fonların tarihsel NAV (Net Aktif Değer) verilerini getiren endpoint'ler")
 public class HistoryController {
 
     private final TefasService tefasService;
@@ -27,16 +35,16 @@ public class HistoryController {
         this.tefasService = tefasService;
     }
 
-    /**
-     * Tek fonun tarihsel fiyat/NAV akışı
-     * GET /v1/funds/{code}/nav?start=YYYY-MM-DD&end=YYYY-MM-DD&page=0&size=20
-     */
+    @Operation(summary = "Fon NAV geçmişi getir", description = "Fonun belirli bir tarih aralığındaki NAV (Net Aktif Değer) geçmişini getirir. "
+            +
+            "Her gün için fiyat, çıkışta dolaşan pay sayısı, toplam değer ve yatırımcı sayısı bilgilerini içerir. " +
+            "Sayfalama desteği vardır (page, size parametreleri).")
     @GetMapping("/{code}/nav")
-    public ResponseEntity<?> getNav(
-            @PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
-            @RequestParam @NotNull(message = "Start date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
-            @RequestParam @NotNull(message = "End date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
-            @PageableDefault(size = 20) Pageable pageable) {
+    public ResponseEntity<PagedResponse<PriceRowDto>> getNav(
+            @Parameter(description = "Fon kodu", required = true, example = "AAK") @PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
+            @Parameter(description = "Başlangıç tarihi (YYYY-MM-DD formatında)", required = true, example = "2024-01-01") @RequestParam @NotNull(message = "Start date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @Parameter(description = "Bitiş tarihi (YYYY-MM-DD formatında)", required = true, example = "2024-01-31") @RequestParam @NotNull(message = "End date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+            @ParameterObject @PageableDefault(size = 20) Pageable pageable) {
 
         if (start.isAfter(end)) {
             throw new InvalidDateRangeException("start date must be <= end date");

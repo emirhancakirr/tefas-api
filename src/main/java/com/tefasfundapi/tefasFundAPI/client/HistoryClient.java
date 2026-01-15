@@ -39,8 +39,7 @@ public class HistoryClient {
         try (Playwright pw = Playwright.create()) {
             log.debug("fetchHistoryJson started for fundCode={}, start={}, end={}", fundCode, start, end);
             // Launch browser with configuration
-            BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config)
-                    .setHeadless(false);
+            BrowserType.LaunchOptions launchOptions = PlaywrightHelper.createLaunchOptions(config);
             try (Browser browser = pw.chromium().launch(launchOptions)) {
                 BrowserContext ctx = browser.newContext(PlaywrightHelper.createContextOptions(config));
                 try {
