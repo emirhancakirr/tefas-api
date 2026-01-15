@@ -1,6 +1,8 @@
 package com.tefasfundapi.tefasFundAPI.controller;
 
 import com.tefasfundapi.tefasFundAPI.dto.FundDto;
+import com.tefasfundapi.tefasFundAPI.dto.FundPerformanceDto;
+import com.tefasfundapi.tefasFundAPI.dto.PagedResponse;
 import com.tefasfundapi.tefasFundAPI.exception.FundNotFoundException;
 import com.tefasfundapi.tefasFundAPI.exception.InvalidDateRangeException;
 import com.tefasfundapi.tefasFundAPI.filter.FieldFilter;
@@ -62,13 +64,8 @@ public class FundController {
             +
             "Tarih aralığına göre fon getirilerini (BindComparisonFundReturns) döndürür. " +
             "Sayfalama desteği vardır (page, size parametreleri).")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Fon performans verileri başarıyla getirildi", content = @Content(mediaType = "application/json")),
-            @ApiResponse(responseCode = "404", description = "Fon bulunamadı", content = @Content(mediaType = "application/json")),
-            @ApiResponse(responseCode = "400", description = "Geçersiz tarih aralığı veya parametre", content = @Content(mediaType = "application/json"))
-    })
     @GetMapping("/{code}/performance")
-    public ResponseEntity<?> getPerformance(
+    public ResponseEntity<PagedResponse<FundPerformanceDto>> getPerformance(
             @Parameter(description = "Fon kodu", required = true, example = "AAK") @PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
             @Parameter(description = "Başlangıç tarihi (YYYY-MM-DD formatında)", required = true, example = "2024-01-01") @RequestParam @NotNull(message = "Start date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @Parameter(description = "Bitiş tarihi (YYYY-MM-DD formatında)", required = true, example = "2024-03-01") @RequestParam @NotNull(message = "End date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,

@@ -3,12 +3,11 @@ package com.tefasfundapi.tefasFundAPI.controller;
 import com.tefasfundapi.tefasFundAPI.exception.FundNotFoundException;
 import com.tefasfundapi.tefasFundAPI.exception.InvalidDateRangeException;
 import com.tefasfundapi.tefasFundAPI.service.TefasService;
+import com.tefasfundapi.tefasFundAPI.dto.PagedResponse;
+import com.tefasfundapi.tefasFundAPI.dto.PriceRowDto;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springdoc.core.annotations.ParameterObject;
 
@@ -40,13 +39,8 @@ public class HistoryController {
             +
             "Her gün için fiyat, çıkışta dolaşan pay sayısı, toplam değer ve yatırımcı sayısı bilgilerini içerir. " +
             "Sayfalama desteği vardır (page, size parametreleri).")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "NAV geçmişi başarıyla getirildi", content = @Content(mediaType = "application/json")),
-            @ApiResponse(responseCode = "404", description = "Fon bulunamadı", content = @Content(mediaType = "application/json")),
-            @ApiResponse(responseCode = "400", description = "Geçersiz tarih aralığı veya parametre", content = @Content(mediaType = "application/json"))
-    })
     @GetMapping("/{code}/nav")
-    public ResponseEntity<?> getNav(
+    public ResponseEntity<PagedResponse<PriceRowDto>> getNav(
             @Parameter(description = "Fon kodu", required = true, example = "AAK") @PathVariable @NotBlank(message = "Fund code cannot be blank") String code,
             @Parameter(description = "Başlangıç tarihi (YYYY-MM-DD formatında)", required = true, example = "2024-01-01") @RequestParam @NotNull(message = "Start date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @Parameter(description = "Bitiş tarihi (YYYY-MM-DD formatında)", required = true, example = "2024-01-31") @RequestParam @NotNull(message = "End date is required") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
