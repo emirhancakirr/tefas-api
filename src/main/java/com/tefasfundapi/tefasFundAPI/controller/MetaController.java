@@ -1,14 +1,31 @@
 package com.tefasfundapi.tefasFundAPI.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
 @RestController
 @RequestMapping("/v1/meta")
+@Tag(name = "Meta", description = "API metadata ve cache bilgilerini getiren endpoint'ler")
 public class MetaController {
 
-    // GET /v1/meta/last-sync
+    @Operation(
+            summary = "Son senkronizasyon bilgileri",
+            description = "API'nin son veri senkronizasyon bilgilerini getirir. " +
+                    "Her kaynak için son kontrol zamanı, durum ve ETag bilgilerini içerir."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Metadata başarıyla getirildi",
+                    content = @Content(mediaType = "application/json")
+            )
+    })
     @GetMapping("/last-sync")
     public Map<String, Object> getLastSync() {
         Map<String, Object> resources = new HashMap<>();
